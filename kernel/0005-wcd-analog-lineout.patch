@@ -1,0 +1,211 @@
+--- a/sound/soc/codecs/msm8916-wcd-analog.c	2026-07-19 20:04:57.000000000 +0300
++++ b/sound/soc/codecs/msm8916-wcd-analog.c	2026-08-25 16:33:48.013092375 +0300
+@@ -47,6 +47,9 @@
+ #define DIG_CLK_CTL_RXD1_CLK_EN		BIT(0)
+ #define DIG_CLK_CTL_RXD2_CLK_EN		BIT(1)
+ #define DIG_CLK_CTL_RXD3_CLK_EN		BIT(2)
++#define DIG_CLK_CTL_SPKR_CLK_EN		BIT(5)
++#define CDC_A_BOOST_EN_MAIN		BIT(7)
++#define CDC_A_BOOST_EN_PWRSTG		BIT(6)
+ #define DIG_CLK_CTL_D_MBHC_CLK_EN_MASK	BIT(3)
+ #define DIG_CLK_CTL_D_MBHC_CLK_EN	BIT(3)
+ #define DIG_CLK_CTL_TXD_CLK_EN		BIT(4)
+@@ -235,6 +238,8 @@
+ #define RX_EAR_CTL_PA_SEL_MASK			BIT(7)
+ #define RX_EAR_CTL_PA_SEL			BIT(7)
+ 
++#define CDC_A_RX_LO_DAC_CTL		(0xf1AC)
++#define CDC_A_RX_LO_EN_CTL		(0xf1AD)
+ #define CDC_A_SPKR_DAC_CTL		(0xf1B0)
+ #define SPKR_DAC_CTL_DAC_RESET_MASK	BIT(4)
+ #define SPKR_DAC_CTL_DAC_RESET_NORMAL	0
+@@ -268,6 +273,8 @@
+ #define CDC_A_SPKR_DRV_DBG		(0xf1B7)
+ #define CDC_A_CURRENT_LIMIT		(0xf1C0)
+ #define CDC_A_BOOST_EN_CTL		(0xf1C3)
++#define CDC_A_BYPASS_MODE		(0xf1C2)
++#define CDC_A_BYPASS_MODE_EN		BIT(5)
+ #define CDC_A_SLOPE_COMP_IP_ZERO	(0xf1C4)
+ #define CDC_A_SEC_ACCESS		(0xf1D0)
+ #define CDC_A_PERPH_RESET_CTL3		(0xf1DA)
+@@ -331,6 +338,10 @@
+ static const struct soc_enum rdac2_mux_enum = SOC_ENUM_SINGLE(
+ 			CDC_D_CDC_CONN_HPHR_DAC_CTL, 0, 2, rdac2_mux_text);
+ 
++static const struct snd_kcontrol_new lineout_switch[] = {
++	SOC_DAPM_SINGLE_VIRT("Switch", 1)
++};
++
+ static const struct snd_kcontrol_new spkr_switch[] = {
+ 	SOC_DAPM_SINGLE("Switch", CDC_A_SPKR_DAC_CTL, 7, 1, 0)
+ };
+@@ -626,6 +637,53 @@
+ 	return 0;
+ }
+ 
++/*
++ * Тракт LINEOUT. В mainline его не было вовсе, а на планшетах Samsung
++ * SM-T380/T385 именно с LINEOUT снимает сигнал внешний усилитель
++ * основного динамика. Последовательность регистров повторяет стоковый
++ * драйвер msm8x16-wcd (msm8x16_wcd_lo_dac_event).
++ */
++static int pm8916_wcd_analog_enable_lo_dac(struct snd_soc_dapm_widget *w,
++					   struct snd_kcontrol *kcontrol,
++					   int event)
++{
++	struct snd_soc_component *component = snd_soc_dapm_to_component(w->dapm);
++
++	switch (event) {
++	case SND_SOC_DAPM_PRE_PMU:
++		snd_soc_component_update_bits(component, CDC_A_RX_LO_EN_CTL,
++					      0x20, 0x20);
++		snd_soc_component_update_bits(component, CDC_A_RX_LO_EN_CTL,
++					      0x80, 0x80);
++		snd_soc_component_update_bits(component, CDC_A_RX_LO_DAC_CTL,
++					      0x08, 0x08);
++		snd_soc_component_update_bits(component, CDC_A_RX_LO_DAC_CTL,
++					      0x40, 0x40);
++		break;
++	case SND_SOC_DAPM_POST_PMU:
++		snd_soc_component_update_bits(component, CDC_A_RX_LO_DAC_CTL,
++					      0x80, 0x80);
++		snd_soc_component_update_bits(component, CDC_A_RX_LO_DAC_CTL,
++					      0x08, 0x00);
++		break;
++	case SND_SOC_DAPM_POST_PMD:
++		usleep_range(20000, 20100);
++		snd_soc_component_update_bits(component, CDC_A_RX_LO_DAC_CTL,
++					      0x80, 0x00);
++		snd_soc_component_update_bits(component, CDC_A_RX_LO_DAC_CTL,
++					      0x40, 0x00);
++		snd_soc_component_update_bits(component, CDC_A_RX_LO_DAC_CTL,
++					      0x08, 0x00);
++		snd_soc_component_update_bits(component, CDC_A_RX_LO_EN_CTL,
++					      0x80, 0x00);
++		snd_soc_component_update_bits(component, CDC_A_RX_LO_EN_CTL,
++					      0x20, 0x00);
++		break;
++	}
++
++	return 0;
++}
++
+ static int pm8916_wcd_analog_enable_spk_pa(struct snd_soc_dapm_widget *w,
+ 					    struct snd_kcontrol *kcontrol,
+ 					    int event)
+@@ -634,21 +692,59 @@
+ 
+ 	switch (event) {
+ 	case SND_SOC_DAPM_PRE_PMU:
++		/*
++		 * SPK (cajon): каскад класса D питаем в режиме БАЙПАСА —
++		 * напрямую от батареи, мимо встроенного повышающего
++		 * преобразователя. Буст на этом экземпляре сгорел: с ним
++		 * тракт статически тянет ~0.55 А даже на цифровой тишине,
++		 * а звука нет. Последовательность — стоковый
++		 * msm8x16_wcd_codec_enable_spk_pa, ветка BYPASS_ALWAYS:
++		 * аналоговый и цифровой такты SPKR, бит байпаса, DAC под
++		 * сбросом на время включения силового каскада (без этого
++		 * включение срабатывает через раз), затем LDO питания.
++		 */
++		snd_soc_component_write(component, CDC_A_CURRENT_LIMIT, 0xA2);
++		snd_soc_component_update_bits(component, CDC_A_SPKR_DRV_CTL,
++				    0x69, 0x69);
++		snd_soc_component_update_bits(component, CDC_A_SPKR_DRV_DBG,
++				    0x01, 0x01);
++		snd_soc_component_update_bits(component,
++				    CDC_A_SLOPE_COMP_IP_ZERO, 0x88, 0x88);
++		snd_soc_component_update_bits(component, CDC_A_SPKR_DAC_CTL,
++				    0x03, 0x03);
++		snd_soc_component_update_bits(component, CDC_A_SPKR_OCP_CTL,
++				    0xE1, 0xE1);
++		snd_soc_component_update_bits(component, CDC_D_CDC_ANA_CLK_CTL,
++				    ANA_CLK_CTL_SPKR_CLK_EN_MASK,
++				    ANA_CLK_CTL_SPKR_CLK_EN);
++		snd_soc_component_update_bits(component, CDC_D_CDC_DIG_CLK_CTL,
++				    DIG_CLK_CTL_SPKR_CLK_EN,
++				    DIG_CLK_CTL_SPKR_CLK_EN);
++		snd_soc_component_update_bits(component, CDC_A_SPKR_PWRSTG_CTL,
++				    SPKR_PWRSTG_CTL_DAC_EN_MASK,
++				    SPKR_PWRSTG_CTL_DAC_EN);
++		snd_soc_component_update_bits(component, CDC_A_SPKR_DAC_CTL,
++				    SPKR_DAC_CTL_DAC_RESET_MASK,
++				    SPKR_DAC_CTL_DAC_RESET_MASK);
++		usleep_range(1000, 1100);
+ 		snd_soc_component_update_bits(component, CDC_A_SPKR_PWRSTG_CTL,
+-				    SPKR_PWRSTG_CTL_DAC_EN_MASK |
+ 				    SPKR_PWRSTG_CTL_BBM_MASK |
+ 				    SPKR_PWRSTG_CTL_HBRDGE_EN_MASK |
+ 				    SPKR_PWRSTG_CTL_CLAMP_EN_MASK,
+-				    SPKR_PWRSTG_CTL_DAC_EN|
+ 				    SPKR_PWRSTG_CTL_BBM_EN |
+ 				    SPKR_PWRSTG_CTL_HBRDGE_EN |
+ 				    SPKR_PWRSTG_CTL_CLAMP_EN);
+-
+ 		snd_soc_component_update_bits(component, CDC_A_RX_EAR_CTL,
+ 				    RX_EAR_CTL_SPK_VBAT_LDO_EN_MASK,
+ 				    RX_EAR_CTL_SPK_VBAT_LDO_EN_ENABLE);
+ 		break;
+ 	case SND_SOC_DAPM_POST_PMU:
++		usleep_range(1000, 1100);
++		/* Отпускаем сброс DAC — сток делает это после включения
++		 * силового каскада (ветка BYPASS_ALWAYS). */
++		snd_soc_component_update_bits(component, CDC_A_SPKR_DAC_CTL,
++				    SPKR_DAC_CTL_DAC_RESET_MASK,
++				    SPKR_DAC_CTL_DAC_RESET_NORMAL);
+ 		snd_soc_component_update_bits(component, CDC_A_SPKR_DRV_CTL,
+ 				    SPKR_DRV_CTL_DEF_MASK,
+ 				    SPKR_DRV_CTL_DEF_VAL);
+@@ -668,6 +764,11 @@
+ 				    SPKR_DAC_CTL_DAC_RESET_NORMAL);
+ 		snd_soc_component_update_bits(component, CDC_A_RX_EAR_CTL,
+ 				    RX_EAR_CTL_SPK_VBAT_LDO_EN_MASK, 0);
++		/* Такты гасим зеркально включению; BYPASS_MODE не трогаем. */
++		snd_soc_component_update_bits(component, CDC_D_CDC_DIG_CLK_CTL,
++				    DIG_CLK_CTL_SPKR_CLK_EN, 0);
++		snd_soc_component_update_bits(component, CDC_D_CDC_ANA_CLK_CTL,
++				    ANA_CLK_CTL_SPKR_CLK_EN_MASK, 0);
+ 		break;
+ 	}
+ 	return 0;
+@@ -753,6 +854,10 @@
+ 	{CDC_A_SPKR_DRV_CTL, 0x69},
+ 	{CDC_A_SPKR_DRV_DBG, 0x01},
+ 	{CDC_A_BOOST_EN_CTL, 0x5F},
++	/* Байпас буста навсегда: буст сгорел (см. enable_spk_pa).
++	 * Переключение BYPASS_MODE на ходу глушит весь кодек до
++	 * полного обесточивания — поэтому только здесь, при probe. */
++	{CDC_A_BYPASS_MODE, 0x38},
+ 	{CDC_A_SLOPE_COMP_IP_ZERO, 0x88},
+ 	{CDC_A_SEC_ACCESS, 0xA5},
+ 	{CDC_A_PERPH_RESET_CTL3, 0x0F},
+@@ -893,6 +998,12 @@
+ 	{"SPK PA", NULL, "SPK DAC"},
+ 	{"SPK DAC", "Switch", "PDM_RX3"},
+ 
++	{"LINEOUT", NULL, "LINEOUT PA"},
++	{"LINEOUT PA", NULL, "RX_BIAS"},
++	{"LINEOUT PA", NULL, "SPKR_CLK"},
++	{"LINEOUT PA", NULL, "LINEOUT DAC"},
++	{"LINEOUT DAC", "Switch", "PDM_RX3"},
++
+ 	{"MIC_BIAS1", NULL, "INT_LDO_H"},
+ 	{"MIC_BIAS2", NULL, "INT_LDO_H"},
+ 	{"MIC_BIAS1", NULL, "vdd-micbias"},
+@@ -947,6 +1058,16 @@
+ 	SND_SOC_DAPM_MIXER("SPK DAC", SND_SOC_NOPM, 0, 0,
+ 			   spkr_switch, ARRAY_SIZE(spkr_switch)),
+ 
++	/* Линейный выход — внешний усилитель динамика Samsung */
++	SND_SOC_DAPM_MIXER("LINEOUT DAC", SND_SOC_NOPM, 0, 0,
++			   lineout_switch, ARRAY_SIZE(lineout_switch)),
++	SND_SOC_DAPM_PGA_E("LINEOUT PA", CDC_A_RX_LO_EN_CTL,
++			   6, 0, NULL, 0,
++			   pm8916_wcd_analog_enable_lo_dac,
++			   SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMU |
++			   SND_SOC_DAPM_POST_PMD),
++	SND_SOC_DAPM_OUTPUT("LINEOUT"),
++
+ 	/* Speaker */
+ 	SND_SOC_DAPM_OUTPUT("SPK_OUT"),
+ 	SND_SOC_DAPM_PGA_E("SPK PA", CDC_A_SPKR_DRV_CTL,

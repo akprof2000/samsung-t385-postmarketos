@@ -1,0 +1,535 @@
+--- a/drivers/power/supply/Makefile	2026-07-19 20:04:57.000000000 +0300
++++ b/drivers/power/supply/Makefile	2026-08-24 16:48:29.731931414 +0300
+@@ -136,3 +136,5 @@
+ obj-$(CONFIG_FUEL_GAUGE_MM8013)	+= mm8013.o
+ obj-$(CONFIG_MACSMC_POWER)	+= macsmc-power.o
+ obj-$(CONFIG_CHARGER_MAX77759)	+= max77759_charger.o
++obj-$(CONFIG_BATTERY_SM5703)	+= sm5703-fuelgauge.o
++obj-$(CONFIG_CHARGER_SM5703)	+= sm5703-charger.o
+--- a/drivers/power/supply/Kconfig	2026-07-19 20:04:57.000000000 +0300
++++ b/drivers/power/supply/Kconfig	2026-08-24 16:50:46.215741724 +0300
+@@ -1197,3 +1197,20 @@
+ 	  Say Y or M here if you have an Apple Silicon based Mac.
+ 
+ endif # POWER_SUPPLY
++
++config BATTERY_SM5703
++	tristate "SiliconMitus SM5703 fuel gauge"
++	depends on I2C
++	select REGMAP_I2C
++	help
++	  Fuel gauge part of the SiliconMitus SM5703 MFD, as found in the
++	  Samsung Galaxy Tab A 8.0 (2017).
++
++config CHARGER_SM5703
++	tristate "SiliconMitus SM5703 charger"
++	depends on I2C
++	select REGMAP_I2C
++	help
++	  Charging status reporting for the charger block of the
++	  SiliconMitus SM5703 MFD, as found in the Samsung Galaxy
++	  Tab A 8.0 (2017) tablets.
+--- /dev/null	2026-08-24 16:20:08.763237652 +0300
++++ b/drivers/power/supply/sm5703-fuelgauge.c	2026-08-23 18:51:58.754629777 +0300
+@@ -0,0 +1,240 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Датчик заряда SiliconMitus SM5703 (часть MFD SM5703).
++ * Написан для Samsung Galaxy Tab A 8.0 (2017), SM-T385 / SM-T380.
++ *
++ * В mainline драйвера нет. Карта регистров и формулы взяты из стокового
++ * драйвера Samsung (drivers/battery_v2/sm5703_fuelgauge.c ядра msm8917)
++ * и проверены чтением с живой микросхемы: при полной батарее на кабеле
++ * регистр 0x07 даёт 0x0451 -> 4316 мВ, регистр 0x05 даёт 0x6400 -> 100 %.
++ *
++ * Особенность: 16-битные слова читаются в ПРЯМОМ порядке байтов
++ * (младший первым), а не в сетевом, как принято у большинства I2C-датчиков.
++ * Стоковый код это подчёркивает комментарием "not use big endian".
++ */
++
++#include <linux/i2c.h>
++#include <linux/module.h>
++#include <linux/of.h>
++#include <linux/power_supply.h>
++#include <linux/regmap.h>
++
++#define SM5703_FG_REG_DEVICE_ID		0x00
++#define SM5703_FG_REG_CNTL		0x01
++#define SM5703_FG_REG_STATUS		0x04
++#define SM5703_FG_REG_SOC		0x05
++#define SM5703_FG_REG_OCV		0x06
++#define SM5703_FG_REG_VOLTAGE		0x07
++#define SM5703_FG_REG_CURRENT		0x08
++#define SM5703_FG_REG_TEMPERATURE	0x09
++
++struct sm5703_fg {
++	struct device *dev;
++	struct regmap *regmap;
++	struct power_supply *psy;
++};
++
++static const struct regmap_config sm5703_fg_regmap_config = {
++	.reg_bits = 8,
++	.val_bits = 16,
++	.val_format_endian = REGMAP_ENDIAN_LITTLE,
++	.max_register = 0xff,
++};
++
++/* Регистры 0x06 и 0x07: биты 10..8 — целые вольты, 7..0 — доли в 1/256 В. */
++static int sm5703_fg_read_voltage_uv(struct sm5703_fg *fg, unsigned int reg, int *uv)
++{
++	unsigned int v;
++	int ret = regmap_read(fg->regmap, reg, &v);
++
++	if (ret)
++		return ret;
++	*uv = ((v & 0x0700) >> 8) * 1000000 + ((v & 0xff) * 1000000) / 256;
++	return 0;
++}
++
++/* Регистр 0x05: биты 15..8 — целые проценты, 7..0 — доли в 1/256 %. */
++static int sm5703_fg_read_soc(struct sm5703_fg *fg, int *pct)
++{
++	unsigned int v;
++	int ret = regmap_read(fg->regmap, SM5703_FG_REG_SOC, &v);
++
++	if (ret)
++		return ret;
++	*pct = (v & 0xff00) >> 8;
++	if ((v & 0xff) >= 128)
++		(*pct)++;
++	if (*pct > 100)
++		*pct = 100;
++	return 0;
++}
++
++/*
++ * Регистр 0x08: бит 15 — знак (1 = разряд), биты 10..8 — целые амперы,
++ * 7..0 — доли в 1/256 А. Раскладка та же, что у напряжения, плюс знак.
++ */
++static int sm5703_fg_read_current_ua(struct sm5703_fg *fg, int *ua)
++{
++	unsigned int v;
++	int ret = regmap_read(fg->regmap, SM5703_FG_REG_CURRENT, &v);
++
++	if (ret)
++		return ret;
++	*ua = ((v & 0x0700) >> 8) * 1000000 + ((v & 0xff) * 1000000) / 256;
++	if (v & 0x8000)
++		*ua = -*ua;
++	return 0;
++}
++
++/*
++ * Регистр 0x09: бит 15 — знак, биты 14..8 — целые градусы,
++ * 7..0 — доли в 1/256 °C. Отдаём в десятых долях градуса.
++ */
++static int sm5703_fg_read_temp_dc(struct sm5703_fg *fg, int *dc)
++{
++	unsigned int v;
++	int ret = regmap_read(fg->regmap, SM5703_FG_REG_TEMPERATURE, &v);
++
++	if (ret)
++		return ret;
++	*dc = ((v & 0x7f00) >> 8) * 10 + ((v & 0xff) * 10) / 256;
++	if (v & 0x8000)
++		*dc = -*dc;
++	return 0;
++}
++
++static int sm5703_fg_get_property(struct power_supply *psy,
++				  enum power_supply_property psp,
++				  union power_supply_propval *val)
++{
++	struct sm5703_fg *fg = power_supply_get_drvdata(psy);
++	int ret, v;
++
++	switch (psp) {
++	case POWER_SUPPLY_PROP_PRESENT:
++		val->intval = 1;
++		return 0;
++	case POWER_SUPPLY_PROP_TECHNOLOGY:
++		val->intval = POWER_SUPPLY_TECHNOLOGY_LION;
++		return 0;
++	case POWER_SUPPLY_PROP_VOLTAGE_NOW:
++		ret = sm5703_fg_read_voltage_uv(fg, SM5703_FG_REG_VOLTAGE, &v);
++		break;
++	case POWER_SUPPLY_PROP_VOLTAGE_OCV:
++		ret = sm5703_fg_read_voltage_uv(fg, SM5703_FG_REG_OCV, &v);
++		break;
++	case POWER_SUPPLY_PROP_CAPACITY:
++		ret = sm5703_fg_read_soc(fg, &v);
++		break;
++	case POWER_SUPPLY_PROP_CURRENT_NOW:
++		ret = sm5703_fg_read_current_ua(fg, &v);
++		break;
++	case POWER_SUPPLY_PROP_TEMP:
++		ret = sm5703_fg_read_temp_dc(fg, &v);
++		break;
++	case POWER_SUPPLY_PROP_STATUS:
++		/*
++		 * Зарядного драйвера пока нет; судим по знаку тока:
++		 * положительный — заряд, отрицательный — разряд.
++		 */
++		ret = sm5703_fg_read_current_ua(fg, &v);
++		if (ret)
++			break;
++		if (v > 20000)
++			val->intval = POWER_SUPPLY_STATUS_CHARGING;
++		else if (v < -20000)
++			val->intval = POWER_SUPPLY_STATUS_DISCHARGING;
++		else {
++			ret = sm5703_fg_read_soc(fg, &v);
++			if (ret)
++				break;
++			val->intval = v >= 100 ? POWER_SUPPLY_STATUS_FULL
++					       : POWER_SUPPLY_STATUS_NOT_CHARGING;
++		}
++		return ret;
++	default:
++		return -EINVAL;
++	}
++
++	if (ret)
++		return ret;
++	val->intval = v;
++	return 0;
++}
++
++static const enum power_supply_property sm5703_fg_props[] = {
++	POWER_SUPPLY_PROP_STATUS,
++	POWER_SUPPLY_PROP_PRESENT,
++	POWER_SUPPLY_PROP_TECHNOLOGY,
++	POWER_SUPPLY_PROP_VOLTAGE_NOW,
++	POWER_SUPPLY_PROP_VOLTAGE_OCV,
++	POWER_SUPPLY_PROP_CURRENT_NOW,
++	POWER_SUPPLY_PROP_CAPACITY,
++	POWER_SUPPLY_PROP_TEMP,
++};
++
++static const struct power_supply_desc sm5703_fg_desc = {
++	.name = "sm5703-battery",
++	.type = POWER_SUPPLY_TYPE_BATTERY,
++	.properties = sm5703_fg_props,
++	.num_properties = ARRAY_SIZE(sm5703_fg_props),
++	.get_property = sm5703_fg_get_property,
++};
++
++static int sm5703_fg_probe(struct i2c_client *client)
++{
++	struct power_supply_config cfg = {};
++	struct sm5703_fg *fg;
++	unsigned int id;
++	int ret;
++
++	fg = devm_kzalloc(&client->dev, sizeof(*fg), GFP_KERNEL);
++	if (!fg)
++		return -ENOMEM;
++	fg->dev = &client->dev;
++
++	fg->regmap = devm_regmap_init_i2c(client, &sm5703_fg_regmap_config);
++	if (IS_ERR(fg->regmap))
++		return dev_err_probe(&client->dev, PTR_ERR(fg->regmap),
++				     "failed to init regmap\n");
++
++	ret = regmap_read(fg->regmap, SM5703_FG_REG_DEVICE_ID, &id);
++	if (ret)
++		return dev_err_probe(&client->dev, ret, "failed to read device id\n");
++	dev_info(&client->dev, "SM5703 fuel gauge, device id 0x%04x\n", id);
++
++	cfg.drv_data = fg;
++	cfg.fwnode = dev_fwnode(&client->dev);
++	fg->psy = devm_power_supply_register(&client->dev, &sm5703_fg_desc, &cfg);
++	if (IS_ERR(fg->psy))
++		return dev_err_probe(&client->dev, PTR_ERR(fg->psy),
++				     "failed to register power supply\n");
++
++	i2c_set_clientdata(client, fg);
++	return 0;
++}
++
++static const struct of_device_id sm5703_fg_of_match[] = {
++	{ .compatible = "siliconmitus,sm5703-fg" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, sm5703_fg_of_match);
++
++static const struct i2c_device_id sm5703_fg_i2c_id[] = {
++	{ "sm5703-fg" },
++	{ }
++};
++MODULE_DEVICE_TABLE(i2c, sm5703_fg_i2c_id);
++
++static struct i2c_driver sm5703_fg_driver = {
++	.driver = {
++		.name = "sm5703-fuelgauge",
++		.of_match_table = sm5703_fg_of_match,
++	},
++	.probe = sm5703_fg_probe,
++	.id_table = sm5703_fg_i2c_id,
++};
++module_i2c_driver(sm5703_fg_driver);
++
++MODULE_DESCRIPTION("SiliconMitus SM5703 fuel gauge driver");
++MODULE_LICENSE("GPL");
+--- /dev/null
++++ b/drivers/power/supply/sm5703-charger.c
+@@ -0,0 +1,258 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Зарядное устройство Siliconmitus SM5703 (Samsung SM-T380/T385).
++ *
++ * В mainline для SM5703 нет ничего, кроме описания привязки регуляторов:
++ * ни MFD, ни зарядки. Микросхема при этом заряжает батарею сама — режим
++ * и токи выставляет загрузчик — поэтому задача драйвера скромная:
++ * показать системе присутствие кабеля и ход зарядки и удерживать режим
++ * CHARGING_ON. Токи намеренно не трогаем: они уже настроены загрузчиком,
++ * а ошибка в них опасна для батареи.
++ *
++ * Карта регистров взята из стокового драйвера Samsung
++ * (drivers/battery_v2/sm5703_charger.c, include/linux/mfd/sm5703_irq.h)
++ * и сверена с живой микросхемой на SM-T385:
++ *   STATUS3 (0x0A) = 0x03 при идущей зарядке (бит CHGON),
++ *   STATUS5 (0x6B) = 0x20 при вставленном кабеле (бит VBUSOK),
++ *   CNTL    (0x0C) = 0x55 (режим 5 = CHARGING_ON, AUTOSET).
++ *
++ * Привязывается прямо к узлу sm5703mfd@49: отдельного драйвера MFD нет,
++ * а заводить его ради одной ячейки незачем.
++ */
++#include <linux/gpio/consumer.h>
++#include <linux/i2c.h>
++#include <linux/leds.h>
++#include <linux/module.h>
++#include <linux/of.h>
++#include <linux/power_supply.h>
++#include <linux/regmap.h>
++
++/*
++ * Блок вспышки (FLED). На этой плате свет включается внешним пином
++ * FLEDEN (GPIO33), режим EXTERNAL; чисто регистровое включение света
++ * не даёт (проверено на живом устройстве). Бит ENABSTMR (таймер,
++ * гасящий свет через 1.6 с) не ставим — фонарик должен гореть, пока
++ * его не выключат. Ток фонарика: 10 + 10*N мА, N = 1..13 (140 мА
++ * максимум — стоковый предел).
++ */
++#define SM5703_FLEDCNTL1		0x14
++#define SM5703_FLEDCNTL1_BASE		0x0c
++#define SM5703_FLEDEN_DISABLE		0x00
++#define SM5703_FLEDEN_EXTERNAL		0x03
++#define SM5703_FLEDCNTL2		0x15
++#define SM5703_FLEDCNTL2_INIT		0x94
++#define SM5703_FLEDCNTL4		0x17
++#define SM5703_IMLED_MAX		13
++
++#define SM5703_STATUS1			0x08
++#define SM5703_STATUS3			0x0a
++#define SM5703_STATUS3_CHGON		BIT(0)
++#define SM5703_STATUS3_TOPOFF		BIT(2)
++#define SM5703_STATUS3_DONE		BIT(3)
++#define SM5703_CNTL			0x0c
++#define SM5703_CNTL_OPMODE_MASK		GENMASK(2, 0)
++#define SM5703_CNTL_OPMODE_CHG_ON	0x05
++#define SM5703_VBUSCNTL			0x0d
++#define SM5703_VBUSCNTL_LIMIT_MASK	GENMASK(5, 0)
++#define SM5703_CHGCNTL2			0x0f
++#define SM5703_CHGCNTL2_FASTCHG_MASK	GENMASK(5, 0)
++#define SM5703_DEVICE_ID		0x1e
++#define SM5703_STATUS5			0x6b
++#define SM5703_STATUS5_VBUSOK		BIT(5)
++
++/* Ток из поля регистра: 100 мА + N * 50 мА (формула стокового драйвера). */
++#define SM5703_FIELD_TO_UA(n)		((100 + (n) * 50) * 1000)
++
++struct sm5703_charger {
++	struct regmap *regmap;
++	struct power_supply *psy;
++	struct led_classdev torch;
++	struct gpio_desc *flash_gpio;
++};
++
++static int sm5703_charger_get_property(struct power_supply *psy,
++				       enum power_supply_property psp,
++				       union power_supply_propval *val)
++{
++	struct sm5703_charger *chg = power_supply_get_drvdata(psy);
++	unsigned int reg;
++	int ret;
++
++	switch (psp) {
++	case POWER_SUPPLY_PROP_ONLINE:
++		ret = regmap_read(chg->regmap, SM5703_STATUS5, &reg);
++		if (ret)
++			return ret;
++		val->intval = !!(reg & SM5703_STATUS5_VBUSOK);
++		return 0;
++
++	case POWER_SUPPLY_PROP_STATUS:
++		ret = regmap_read(chg->regmap, SM5703_STATUS5, &reg);
++		if (ret)
++			return ret;
++		if (!(reg & SM5703_STATUS5_VBUSOK)) {
++			val->intval = POWER_SUPPLY_STATUS_DISCHARGING;
++			return 0;
++		}
++		ret = regmap_read(chg->regmap, SM5703_STATUS3, &reg);
++		if (ret)
++			return ret;
++		if (reg & (SM5703_STATUS3_DONE | SM5703_STATUS3_TOPOFF))
++			val->intval = POWER_SUPPLY_STATUS_FULL;
++		else if (reg & SM5703_STATUS3_CHGON)
++			val->intval = POWER_SUPPLY_STATUS_CHARGING;
++		else
++			val->intval = POWER_SUPPLY_STATUS_NOT_CHARGING;
++		return 0;
++
++	case POWER_SUPPLY_PROP_CURRENT_MAX:
++		ret = regmap_read(chg->regmap, SM5703_VBUSCNTL, &reg);
++		if (ret)
++			return ret;
++		val->intval = SM5703_FIELD_TO_UA(reg & SM5703_VBUSCNTL_LIMIT_MASK);
++		return 0;
++
++	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT:
++		ret = regmap_read(chg->regmap, SM5703_CHGCNTL2, &reg);
++		if (ret)
++			return ret;
++		val->intval = SM5703_FIELD_TO_UA(reg & SM5703_CHGCNTL2_FASTCHG_MASK);
++		return 0;
++
++	default:
++		return -EINVAL;
++	}
++}
++
++static const enum power_supply_property sm5703_charger_properties[] = {
++	POWER_SUPPLY_PROP_ONLINE,
++	POWER_SUPPLY_PROP_STATUS,
++	POWER_SUPPLY_PROP_CURRENT_MAX,
++	POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT,
++};
++
++static const struct power_supply_desc sm5703_charger_desc = {
++	.name = "sm5703-charger",
++	.type = POWER_SUPPLY_TYPE_USB,
++	.properties = sm5703_charger_properties,
++	.num_properties = ARRAY_SIZE(sm5703_charger_properties),
++	.get_property = sm5703_charger_get_property,
++};
++
++static const struct regmap_config sm5703_charger_regmap_config = {
++	.reg_bits = 8,
++	.val_bits = 8,
++	.max_register = 0x6b,
++};
++
++static int sm5703_torch_set(struct led_classdev *cdev,
++			    enum led_brightness brightness)
++{
++	struct sm5703_charger *chg =
++		container_of(cdev, struct sm5703_charger, torch);
++	int ret = 0;
++
++	if (brightness) {
++		ret = regmap_write(chg->regmap, SM5703_FLEDCNTL4,
++				   min_t(int, brightness, SM5703_IMLED_MAX));
++		if (!ret)
++			ret = regmap_write(chg->regmap, SM5703_FLEDCNTL1,
++					   SM5703_FLEDCNTL1_BASE |
++					   SM5703_FLEDEN_EXTERNAL);
++		if (!ret)
++			gpiod_set_value_cansleep(chg->flash_gpio, 1);
++	} else {
++		gpiod_set_value_cansleep(chg->flash_gpio, 0);
++		ret = regmap_write(chg->regmap, SM5703_FLEDCNTL1,
++				   SM5703_FLEDCNTL1_BASE |
++				   SM5703_FLEDEN_DISABLE);
++	}
++	return ret;
++}
++
++static int sm5703_torch_register(struct i2c_client *client,
++				 struct sm5703_charger *chg)
++{
++	chg->flash_gpio = devm_gpiod_get_optional(&client->dev, "flash-enable",
++						  GPIOD_OUT_LOW);
++	if (IS_ERR(chg->flash_gpio))
++		return PTR_ERR(chg->flash_gpio);
++	if (!chg->flash_gpio)
++		return 0;
++
++	regmap_write(chg->regmap, SM5703_FLEDCNTL1,
++		     SM5703_FLEDCNTL1_BASE | SM5703_FLEDEN_DISABLE);
++	regmap_write(chg->regmap, SM5703_FLEDCNTL2, SM5703_FLEDCNTL2_INIT);
++
++	chg->torch.name = "white:torch";
++	chg->torch.max_brightness = SM5703_IMLED_MAX;
++	chg->torch.brightness_set_blocking = sm5703_torch_set;
++	chg->torch.flags = LED_CORE_SUSPENDRESUME;
++
++	return devm_led_classdev_register(&client->dev, &chg->torch);
++}
++
++static int sm5703_charger_probe(struct i2c_client *client)
++{
++	struct power_supply_config cfg = {};
++	struct sm5703_charger *chg;
++	unsigned int id;
++	int ret;
++
++	chg = devm_kzalloc(&client->dev, sizeof(*chg), GFP_KERNEL);
++	if (!chg)
++		return -ENOMEM;
++
++	chg->regmap = devm_regmap_init_i2c(client,
++					   &sm5703_charger_regmap_config);
++	if (IS_ERR(chg->regmap))
++		return PTR_ERR(chg->regmap);
++
++	ret = regmap_read(chg->regmap, SM5703_DEVICE_ID, &id);
++	if (ret)
++		return dev_err_probe(&client->dev, ret, "chip is not responding\n");
++
++	/*
++	 * Удерживаем режим зарядки. Обычно он уже включён загрузчиком;
++	 * запись страхует от случаев, когда предыдущий владелец шины
++	 * оставил микросхему в SUSPEND.
++	 */
++	ret = regmap_update_bits(chg->regmap, SM5703_CNTL,
++				 SM5703_CNTL_OPMODE_MASK,
++				 SM5703_CNTL_OPMODE_CHG_ON);
++	if (ret)
++		return ret;
++
++	ret = sm5703_torch_register(client, chg);
++	if (ret)
++		return dev_err_probe(&client->dev, ret,
++				     "failed to register torch\n");
++
++	cfg.drv_data = chg;
++	cfg.fwnode = dev_fwnode(&client->dev);
++	chg->psy = devm_power_supply_register(&client->dev,
++					      &sm5703_charger_desc, &cfg);
++	if (IS_ERR(chg->psy))
++		return PTR_ERR(chg->psy);
++
++	dev_info(&client->dev, "SM5703 charger, device id 0x%02x\n", id);
++	return 0;
++}
++
++static const struct of_device_id sm5703_charger_of_match[] = {
++	{ .compatible = "siliconmitus,sm5703mfd" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, sm5703_charger_of_match);
++
++static struct i2c_driver sm5703_charger_driver = {
++	.driver = {
++		.name = "sm5703-charger",
++		.of_match_table = sm5703_charger_of_match,
++	},
++	.probe = sm5703_charger_probe,
++};
++module_i2c_driver(sm5703_charger_driver);
++
++MODULE_DESCRIPTION("Siliconmitus SM5703 charger driver");
++MODULE_LICENSE("GPL");

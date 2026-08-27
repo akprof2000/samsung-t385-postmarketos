@@ -1,0 +1,107 @@
+diff --git a/platform/msm_shared/scm.c b/platform/msm_shared/scm.c
+index 8c76083..70da98f 100644
+--- a/platform/msm_shared/scm.c
++++ b/platform/msm_shared/scm.c
+@@ -1047,6 +1047,43 @@ int scm_halt_pmic_arbiter(void)
+  * Assumes all sanity checks have been performed on arguments.
+  */
+ 
++
++/*
++ * Samsung SM-T385: XPU не даёт выполнять инструкцию smc из области
++ * загрузчика (0x8F600000). Копируем крошечный стаб в память HLOS
++ * и вызываем монитор оттуда.
++ *
++ * Стаб собран опкодами вручную — компилятор мог бы разместить
++ * литеральный пул за пределами копируемого блока, и после переноса
++ * ldr читал бы мусор.
++ */
++#define LK2ND_HLOS_PARAM_ADDR	0x80055000u
++#define LK2ND_HLOS_STUB_ADDR	0x80056000u
++
++static void lk2nd_smc_hlos_stub(uint32_t x0, uint32_t x1, uint32_t x2,
++				uint32_t x3, uint32_t x4, uint32_t x5)
++{
++	volatile uint32_t *s = (volatile uint32_t *)LK2ND_HLOS_STUB_ADDR;
++
++	s[0] = 0xe59f0018;	/* ldr r0, [pc, #24] */
++	s[1] = 0xe59f1018;	/* ldr r1, [pc, #24] */
++	s[2] = 0xe59f2018;	/* ldr r2, [pc, #24] */
++	s[3] = 0xe59f3018;	/* ldr r3, [pc, #24] */
++	s[4] = 0xe59f4018;	/* ldr r4, [pc, #24] */
++	s[5] = 0xe59f5018;	/* ldr r5, [pc, #24] */
++	s[6] = 0xe3a06000;	/* mov r6, #0        */
++	s[7] = 0xe1600070;	/* smc #0            */
++	s[8]  = x0;
++	s[9]  = x1;
++	s[10] = x2;
++	s[11] = x3;
++	s[12] = x4;
++	s[13] = x5;
++
++	/* Управление сюда не возвращается: монитор уходит в EL1 AArch64. */
++	((void (*)(void))LK2ND_HLOS_STUB_ADDR)();
++}
++
+ void scm_elexec_call(paddr_t kernel_entry, paddr_t dtb_offset)
+ {
+ 	uint32_t svc_id = SCM_SVC_MILESTONE_32_64_ID;
+@@ -1055,6 +1092,13 @@ void scm_elexec_call(paddr_t kernel_entry, paddr_t dtb_offset)
+ 	size_t cmd_len;
+ 	static el1_system_param param __attribute__((aligned(0x1000)));
+ 	scmcall_arg scm_arg = {0};
++	/*
++	 * Samsung SM-T385 (и другие устройства с SBOOT): XPU не даёт
++	 * секретному монитору читать параметры из области загрузчика
++	 * (0x8F600000). Кладём копию в обычную память HLOS ниже адреса
++	 * загрузки ядра — окно 0x80000000..0x80080000 свободно.
++	 */
++	el1_system_param *hlos_param = (el1_system_param *)LK2ND_HLOS_PARAM_ADDR;
+ 
+ 	param.el1_x0 = dtb_offset;
+ 	param.el1_elr = kernel_entry;
+@@ -1062,23 +1106,29 @@ void scm_elexec_call(paddr_t kernel_entry, paddr_t dtb_offset)
+ 	/* Response Buffer = Null as no response expected */
+ 	dprintf(INFO, "Jumping to kernel via monitor\n");
+ 
+-	if (!is_scm_armv8_support())
+-	{
+-		/* Command Buffer */
+-		cmd_buf = (void *)&param;
+-		cmd_len = sizeof(el1_system_param);
++	/*
++	 * Блок параметров переносим в HLOS: монитору запрещено читать его
++	 * из области загрузчика. Копируем ДО отключения MMU не получится —
++	 * сюда мы попадаем уже с выключенным, поэтому запись идёт прямо
++	 * в физическую память.
++	 */
++	memcpy(hlos_param, &param, sizeof(el1_system_param));
+ 
+-		scm_call(svc_id, cmd_id, cmd_buf, cmd_len, NULL, 0);
+-	}
+-	else
+-	{
+-		scm_arg.x0 = MAKE_SIP_SCM_CMD(SCM_SVC_MILESTONE_32_64_ID, SCM_SVC_MILESTONE_CMD_ID);
+-		scm_arg.x1 = MAKE_SCM_ARGS(0x2, SMC_PARAM_TYPE_BUFFER_READ);
+-		scm_arg.x2 = (uint32_t ) &param;
+-		scm_arg.x3 = sizeof(el1_system_param);
++	scm_arg.x0 = MAKE_SIP_SCM_CMD(SCM_SVC_MILESTONE_32_64_ID, SCM_SVC_MILESTONE_CMD_ID);
++	scm_arg.x1 = MAKE_SCM_ARGS(0x2, SMC_PARAM_TYPE_BUFFER_READ);
++	scm_arg.x2 = (uint32_t)hlos_param;
++	scm_arg.x3 = sizeof(el1_system_param);
+ 
+-		scm_call2(&scm_arg, NULL);
+-	}
++	/*
++	 * И сам вызов монитора — из HLOS-памяти, а не отсюда.
++	 * Возврата не будет.
++	 */
++	lk2nd_smc_hlos_stub(scm_arg.x0, scm_arg.x1, scm_arg.x2, scm_arg.x3, 0, 0);
++
++	(void)cmd_buf;
++	(void)cmd_len;
++	(void)svc_id;
++	(void)cmd_id;
+ 
+ 	/* Assert if execution ever reaches here */
+ 	dprintf(CRITICAL, "Failed to jump to kernel\n");

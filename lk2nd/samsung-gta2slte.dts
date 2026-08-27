@@ -1,0 +1,109 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+ * lk2nd device description — Samsung Galaxy Tab A 8.0 (2017) LTE, SM-T385
+ *
+ * Кодовое имя: gta2slte   (Wi-Fi версия SM-T380 = gta2swifi)
+ * SoC:         Qualcomm MSM8917 (Snapdragon 425)
+ * PMIC:        PM8937   (qcom,pmic-id = 0x10019)
+ *
+ * Все значения ниже сняты с живого устройства: стоковый boot.img был
+ * прочитан из раздела boot, из него извлечены пять приклеенных (appended)
+ * DTB — по одному на ревизию платы 00/01/02/03/05 — и разобраны
+ * инструментом tools/dtb_extract.py.
+ *
+ * Из стоковых DTB:
+ *   model         = "Samsung GTA2SLTE PROJECT Rev05"   (наш экземпляр)
+ *   compatible    = "qcom,msm8917-mtp", "qcom,msm8917", "qcom,mtp"
+ *   qcom,msm-id   = <303 0>, <308 0>, <309 0>
+ *                   = MSM8917 / MSM8217 / MSM8617, все soc_rev 0
+ *   qcom,board-id = <0x8 N>, где N — ревизия платы
+ *   qcom,pmic-id  = <0x10019 0 0 0>
+ *
+ * ВАЖНО: у T385 в boot-образе НЕТ QCDT-секции (dt_size = 0) — DTB просто
+ * сконкатенированы после zImage. Поэтому этот DTB подключается через ADTBS
+ * (appended), а не QCDTBS, иначе SBOOT не найдёт знакомую подпись.
+ */
+
+#include <skeleton64.dtsi>
+#include <lk2nd.dtsi>
+
+/ {
+	/*
+	 * Значения обязаны совпадать со стоковыми, иначе Samsung SBOOT
+	 * откажется передавать управление.
+	 */
+	qcom,msm-id = <QCOM_ID_MSM8917 0>,
+		      <QCOM_ID_MSM8217 0>,
+		      <QCOM_ID_MSM8617 0>;
+
+	/*
+	 * Перечислены все ревизии платы, встречающиеся в стоковой прошивке.
+	 * Наш экземпляр — Rev05, но образ должен подходить и остальным.
+	 */
+	qcom,board-id = <0x8 0>,	/* Rev00 */
+			<0x8 1>,	/* Rev01 */
+			<0x8 2>,	/* Rev02 */
+			<0x8 3>,	/* Rev03 */
+			<0x8 5>;	/* Rev05 — проверено на живом устройстве */
+};
+
+&lk2nd {
+	gta2slte {
+		model = "Samsung Galaxy Tab A 8.0 (2017) LTE (SM-T385)";
+		compatible = "samsung,gta2slte", "samsung,gta2s", "qcom,msm8917";
+
+		/* Стоковый загрузчик представляется как T385XXU... */
+		lk2nd,match-bootloader = "T385*";
+
+		lk2nd,dtb-files = "msm8917-samsung-gta2slte";
+
+		/*
+		 * Кнопки. Взяты из узла gpio_keys стокового DTS:
+		 *   home_key : gpios = <&tlmm 0x80 0x01>  -> GPIO 128, active low
+		 *   vol_up   : gpios = <&tlmm 0x7f 0x01>  -> GPIO 127, active low
+		 * Vol Down и Power висят на PMIC (resin/pwrkey), а не на tlmm,
+		 * поэтому здесь их нет — lk2nd берёт их через pm8x41.
+		 */
+		gpio-keys {
+			compatible = "gpio-keys";
+
+			home {
+				lk2nd,code = <KEY_HOME>;
+				gpios = <&tlmm 128 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+			};
+
+			volume-up {
+				lk2nd,code = <KEY_VOLUMEUP>;
+				gpios = <&tlmm 127 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+			};
+		};
+	};
+};
+
+/*
+ * Страховка: SBOOT не всегда передаёт androidboot.bootloader=, и тогда
+ * узел выше не матчится — меню показывает "Unknown (FIXME!)". Этот узел
+ * матчится по любому cmdline (сборка и так только для T385).
+ */
+&lk2nd {
+	gta2slte-fallback {
+		model = "Samsung Galaxy Tab A 8.0 (2017) LTE (SM-T385)";
+		compatible = "samsung,gta2slte", "samsung,gta2s", "qcom,msm8917";
+		lk2nd,match-cmdline = "*";
+		lk2nd,dtb-files = "msm8917-samsung-gta2slte";
+
+		gpio-keys {
+			compatible = "gpio-keys";
+
+			home {
+				lk2nd,code = <KEY_HOME>;
+				gpios = <&tlmm 128 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+			};
+
+			volume-up {
+				lk2nd,code = <KEY_VOLUMEUP>;
+				gpios = <&tlmm 127 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+			};
+		};
+	};
+};

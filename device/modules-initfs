@@ -1,0 +1,8 @@
+# Модули, которые должны быть в initramfs.
+# stmfts — тачскрин (иначе не потыкать в экран на этапе разблокировки),
+# usb_f_* — USB-сеть для отладочного SSH по кабелю.
+libcomposite
+usb_f_ncm
+usb_f_rndis
+stmfts
+i2c-dev

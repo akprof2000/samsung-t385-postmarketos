@@ -1,0 +1,40 @@
+--- a/drivers/net/wwan/qcom_bam_dmux.c
++++ b/drivers/net/wwan/qcom_bam_dmux.c
+@@ -278,8 +278,20 @@
+ static int bam_dmux_netdev_open(struct net_device *netdev)
+ {
+ 	struct bam_dmux_netdev *bndev = netdev_priv(netdev);
++	struct device *dev = bndev->dmux->dev;
+ 	int ret;
+ 
++	/*
++	 * Если ранний резюм не удался (модем ещё грузился), runtime PM
++	 * защёлкивается в ошибке и все следующие попытки получают
++	 * -EINVAL. Сбрасываем ошибку перед новой попыткой.
++	 */
++	if (dev->power.runtime_error) {
++		pm_runtime_disable(dev);
++		pm_runtime_set_suspended(dev);
++		pm_runtime_enable(dev);
++	}
++
+ 	ret = bam_dmux_send_cmd(bndev, BAM_DMUX_CMD_OPEN);
+ 	if (ret)
+ 		return ret;
+@@ -843,6 +855,16 @@
+ 			bam_dmux_power_off(dmux);
+ 	}
+ 
++	/*
++	 * Прошивки старого поколения (Samsung msm8917) сами каналы не
++	 * открывают: в стоке инициатором выступала сторона Linux.
++	 * Регистрируем интерфейс канала 0 (rmnet-данные) сразу — при
++	 * поднятии интерфейса ndo_open разбудит модем (голосование pc)
++	 * и отправит команду OPEN, как делал заводской драйвер.
++	 */
++	set_bit(0, dmux->remote_channels);
++	schedule_work(&dmux->register_netdev_work);
++
+ 	return 0;
+ 
+ err_disable_pm:

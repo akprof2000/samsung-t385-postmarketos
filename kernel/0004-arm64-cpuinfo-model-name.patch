@@ -1,0 +1,17 @@
+--- a/arch/arm64/kernel/cpuinfo.c	2026-07-19 20:04:57.000000000 +0300
++++ b/arch/arm64/kernel/cpuinfo.c	2026-08-24 17:53:30.674097549 +0300
+@@ -228,6 +228,14 @@
+ 	if (compat)
+ 		seq_printf(m, "model name\t: ARMv8 Processor rev %d (%s)\n",
+ 			   MIDR_REVISION(midr), COMPAT_ELF_PLATFORM);
++	else
++		/*
++		 * И для 64-битных читателей тоже: настройки GNOME/phosh берут
++		 * имя процессора из этой строки, а штатно она печатается
++		 * только 32-битным программам (ради совместимости с glibc).
++		 */
++		seq_printf(m, "model name\t: ARMv8 Processor rev %d (aarch64)\n",
++			   MIDR_REVISION(midr));
+ 
+ 	seq_printf(m, "BogoMIPS\t: %lu.%02lu\n",
+ 		   loops_per_jiffy / (500000UL/HZ),

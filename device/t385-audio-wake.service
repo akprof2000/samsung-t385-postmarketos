@@ -1,0 +1,11 @@
+[Unit]
+Description=Wake speaker path before session (SM-T385)
+After=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/t385-audio-wake
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

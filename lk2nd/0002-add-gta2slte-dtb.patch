@@ -1,0 +1,15 @@
+diff --git a/lk2nd/device/dts/msm8952/rules.mk b/lk2nd/device/dts/msm8952/rules.mk
+index a968d79..e1dffba 100644
+--- a/lk2nd/device/dts/msm8952/rules.mk
++++ b/lk2nd/device/dts/msm8952/rules.mk
+@@ -1,5 +1,10 @@
+ # SPDX-License-Identifier: BSD-3-Clause
+ LOCAL_DIR := $(GET_LOCAL_DIR)
+ 
++# ADTBS — приклеенные (appended) DTB.
++# SM-T385 использует именно этот формат: в стоковом boot.img dt_size = 0,
++# а DTB сконкатенированы после zImage. Класть его в QCDTBS нельзя —
++# SBOOT не найдёт подпись.
+ ADTBS += \
+ 	$(LOCAL_DIR)/msm8940-xiaomi-santoni.dtb \
++	$(LOCAL_DIR)/samsung-gta2slte.dtb \

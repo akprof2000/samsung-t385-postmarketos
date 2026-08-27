@@ -1,0 +1,11 @@
+[Unit]
+Description=Volume key blip (SM-T385)
+After=multi-user.target
+
+[Service]
+ExecStart=/usr/bin/python3 /usr/sbin/t385-volblip.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

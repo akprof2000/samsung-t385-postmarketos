@@ -1,0 +1,57 @@
+# Reference: <https://postmarketos.org/deviceinfo>
+# Please use double quotes only. You can source this file in shell scripts.
+#
+# Samsung Galaxy Tab A 8.0 (2017) LTE — SM-T385 (gta2slte)
+#
+# Разведка проведена на живом устройстве (прошивка T385DXS4CUD3,
+# «Samsung GTA2SLTE PROJECT Rev05»): стоковый boot.img прочитан из раздела
+# boot, из него извлечены приклеенные DTB и разобран полный стоковый DTS.
+#
+# Плата совпадает с SM-T380 (gta2swifi) — тачскрин, панель, питание SM5703,
+# USB-C PD S2MM005, шины i2c-gpio и кнопки сходятся до номера GPIO.
+# Отличия: SoC ID (MSM8917=303 против APQ8017=307 у Wi-Fi версии),
+# ревизия платы <0x08 0x05>, splash-регион 3 МБ и наличие модема.
+#
+# Смещения сверены со стоковым boot.img и совпали с T380:
+#   page_size 2048, kernel_addr 0x80008000, ramdisk_addr 0x82000000,
+#   tags_addr 0x81e00000.
+
+deviceinfo_format_version="0"
+deviceinfo_name="Samsung Galaxy Tab A 8.0 (2017) LTE"
+deviceinfo_manufacturer="Samsung"
+deviceinfo_codename="samsung-gta2slte"
+deviceinfo_year="2017"
+deviceinfo_arch="aarch64"
+
+# Device related
+deviceinfo_drm="true"
+deviceinfo_chassis="tablet"
+deviceinfo_keyboard="false"
+deviceinfo_external_storage="true"
+deviceinfo_screen_width="800"
+deviceinfo_screen_height="1280"
+
+# Ядро гасит «неиспользуемые» клоки и домены на старте, включая дисплейный
+# контроллер, который до прихода msm-drm (~18с) сканирует буфер загрузчика.
+# Без этих флагов plymouth рисует сплэш в мёртвый буфер — экран чёрный.
+deviceinfo_kernel_cmdline="clk_ignore_unused pd_ignore_unused quiet splash plymouth.ignore-serial-consoles plymouth.prefer-fbcon"
+
+# Bootloader related
+#
+# Загрузка через lk2nd: он пишется в раздел boot, даёт fastboot, которого
+# у стокового Samsung нет вообще, и сам выбирает нужный DTB по
+# qcom,msm-id / qcom,board-id.
+deviceinfo_flash_method="fastboot"
+deviceinfo_partition_type="gpt"
+
+# extlinux.conf
+deviceinfo_dtb="qcom/msm8917-samsung-gta2slte"
+deviceinfo_generate_extlinux_config="true"
+deviceinfo_boot_filesystem="ext2"
+
+# USB-сеть для отладочного SSH по кабелю.
+# MAC зафиксированы, чтобы адрес не менялся между загрузками.
+deviceinfo_usb_network_udc="ci_hdrc.0"
+deviceinfo_usb_network_function="ncm.usb0"
+deviceinfo_usb_network_host_addr="ba:ad:f0:0d:ca:fe"
+deviceinfo_usb_network_device_addr="de:ad:be:ef:ca:fe"

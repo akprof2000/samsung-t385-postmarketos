@@ -1,0 +1,1635 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+ * Samsung Galaxy Tab A 8.0 (2017) LTE - SM-T385 (gta2slte)
+ * postmarketOS mainline device tree
+ *
+ * Выведен из порта SM-T380 (gta2swifi) авторства sapphicdisaster:
+ *   https://github.com/sapphicdisaster/t380-linux
+ * Все значения сверены со стоковым DTB, прочитанным с живого SM-T385
+ * (Samsung GTA2SLTE PROJECT Rev05, прошивка T385DXS4CUD3).
+ *
+ * Платы T380 и T385 электрически идентичны: тачскрин, панель, питание
+ * SM5703, USB-C PD S2MM005, все шины i2c-gpio и кнопки совпали до
+ * номера GPIO. Отличия — SoC ID (MSM8917 против APQ8017), ревизия платы,
+ * размер splash-региона и наличие модема.
+ */
+
+/dts-v1/;
+
+#include <dt-bindings/interrupt-controller/irq.h>
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/input/linux-event-codes.h>
+#include <dt-bindings/clock/qcom,rpmcc.h>
+#include <dt-bindings/power/qcom-rpmpd.h>
+#include "msm8917.dtsi"
+#include "pm8937.dtsi"
+/* dai-link-и звукового тракта: mm1-4, primary/tertiary MI2S */
+#include "msm8937-qdsp6.dtsi"
+
+/ {
+	    model = "Samsung Galaxy Tab A 8.0 (2017) LTE (SM-T385)";
+	
+	compatible = "samsung,gta2slte", "qcom,msm8917";
+	
+	/* MSM8917. У Wi-Fi версии T380 здесь 307 (APQ8017, без модема). */
+	qcom,msm-id = <303 0>;
+	/* Ревизия платы 05 — снята с живого устройства. */
+	qcom,board-id = <0x08 0x05>;
+
+	aliases {
+		serial0 = &blsp1_uart2;
+        sdhc1 = &sdhc_1;
+        sdhc2 = &sdhc_2;
+		i2c2 = &blsp1_i2c2;
+		i2c3 = &blsp1_i2c3;
+		i2c4 = &blsp1_i2c4;
+	};
+
+	gpio-keys {
+		compatible = "gpio-keys";
+		pinctrl-names = "default", "sleep";
+		pinctrl-0 = <&gpio_keys_default>;
+		pinctrl-1 = <&gpio_keys_sleep>;
+
+		event-hall-sensor {
+			/* Датчик Холла чехла (сток: hall,gpio_flip_cover GPIO46,
+			 * подтяжка вверх). Открыт = 1, закрыт (магнит) = 0 —
+			 * проверено на живом устройстве. */
+			label = "Hall Effect Sensor";
+			gpios = <&tlmm 46 GPIO_ACTIVE_LOW>;
+			linux,input-type = <EV_SW>;
+			linux,code = <SW_LID>;
+			linux,can-disable;
+			wakeup-source;
+		};
+
+		home {
+			label = "Home";
+			gpios = <&tlmm 128 GPIO_ACTIVE_LOW>;
+			linux,code = <KEY_HOMEPAGE>;
+			wakeup-source;
+			debounce-interval = <15>;
+		};
+
+		volume-up {
+			label = "Volume Up";
+			gpios = <&tlmm 127 GPIO_ACTIVE_LOW>;
+			linux,code = <KEY_VOLUMEUP>;
+			debounce-interval = <15>;
+		};
+	};
+
+	sm5703_battery: battery {
+		compatible = "simple-battery";
+		charge-full-design-microamp-hours = <5000000>;
+		voltage-min-design-microvolt = <3400000>;
+		voltage-max-design-microvolt = <4400000>;
+		constant-charge-current-max-microamp = <2000000>;
+		constant-charge-voltage-max-microvolt = <4400000>;
+	};
+
+	chosen {
+		stdout-path = "serial0:115200n8";
+		
+		#address-cells = <2>;
+		#size-cells = <2>;
+		ranges;
+
+		                framebuffer0: framebuffer@a80006a8 {
+			compatible = "simple-framebuffer";
+			/*
+			 * Кадровый буфер, оставленный загрузчиком lk2nd.
+			 *
+			 * Формат в доноре указан как "g8b8r8" — такого имени
+			 * ядро не знает: в SIMPLEFB_FORMATS (include/linux/
+			 * platform_data/simplefb.h) при 24 битах есть только
+			 * "r8g8b8". При неизвестном имени simpledrm отвергает
+			 * узел с -EINVAL. Шаг 2400 = 800*3 подтверждает 24 бита.
+			 *
+			 * Обслуживает узел CONFIG_DRM_SIMPLEDRM; без него
+			 * узел не даёт ничего независимо от status.
+			 */
+			/*
+			 * ВКЛЮЧЁН (r54): plymouth рисует сплэш на simpledrm с
+			 * ~4-й секунды. Старое падение plymouth (SIGSEGV при
+			 * передаче simpledrm -> msm-drm) больше не воспроизводимо:
+			 * plymouth завершается на ~11с, msm-drm приходит на ~25с —
+			 * пересечения нет. Если краш вернётся — гасить обратно.
+			 */
+			status = "okay";
+			reg = <0x00 0xa80006a8 0x00 0x2ee000>;  /* 800*1280*3 */
+			width = <800>;
+			height = <1280>;
+			stride = <2400>;
+			format = "r8g8b8";
+			memory-region = <&splash_region>;
+		};	};
+
+	reserved-memory {
+		#address-cells = <0x02>;
+		#size-cells = <0x02>;
+		ranges;
+
+		/* other_ext_region @ 86100000 - Protected by base qseecom node */
+
+		/* smem gap @ 86300000 - Protected by base smem node */
+
+		/* smem gap @ 86300000 (1MB) - Protected by soc smem node */
+
+		/* other_ext_region_post @ 86400000 - Protected by base reserved node */
+
+		ramoops@af980000 {
+			compatible = "ramoops";
+			reg = <0x00 0xaf980000 0x00 0x80000>;
+			record-size = <0x20000>;
+			console-size = <0x20000>;
+			no-map;
+		};
+
+		shield_gap1: shield@85a00000 {
+			compatible = "removed-dma-pool";
+			no-map;
+			reg = <0x00 0x85a00000 0x00 0x100000>;
+		};
+
+		/* qseecom_mem @ 85b00000 - Protected by base DTSI node */
+
+		tzapp_region@84500000 {
+			compatible = "removed-dma-pool";
+			no-map;
+			reg = <0x00 0x84500000 0x00 0xb00000>;
+		};
+
+		/*
+		 * Область прошивки модема описана ниже через &mpss_mem
+		 * (0x86800000, 0x5a00000 — стоковый размер T385): прежняя
+		 * защитная заглушка modem_region превратилась в рабочий
+		 * резерв remoteproc-а модема.
+		 */
+
+		/*
+		 * Область прошивки ADSP описана ниже через &adsp_mem: прежняя
+		 * защитная заглушка removed-dma-pool занимала это же место
+		 * и не давала звуковому сопроцессору подняться.
+		 */
+
+		wcnss_fw_region: wcnss_fw_region@8da00000 {
+			compatible = "removed-dma-pool";
+			no-map;
+			reg = <0x00 0x8da00000 0x00 0x700000>;
+		};
+
+		/* Первый мегабайт бывшего щита отдан под mba_mem (см. ниже) */
+		shield_gap2: shield@8e200000 {
+			compatible = "removed-dma-pool";
+			no-map;
+			reg = <0x00 0x8e200000 0x00 0x1400000>;
+		};
+
+		/*
+		 * Область видеодекодера venus описана ниже через &venus_mem:
+		 * прежняя защитная заглушка removed-dma-pool занимала это же
+		 * место и не давала декодеру получить память ("failed to
+		 * lookup reserved memory-region").
+		 */
+
+		shield_gap3: shield@8f900000 {
+			compatible = "removed-dma-pool";
+			no-map;
+			reg = <0x00 0x8f900000 0x00 0x300000>;
+		};
+
+		shield_gap4_pre: shield@90000000 {
+			compatible = "removed-dma-pool";
+			no-map;
+			reg = <0x00 0x90000000 0x00 0x2100000>;
+		};
+
+		/* rmtfs @ 92100000 - Protected by base node */
+
+		shield_gap4_post: shield@92280000 {
+			compatible = "removed-dma-pool";
+			no-map;
+			reg = <0x00 0x92280000 0x00 0x0d80000>;
+		};
+
+		secure_region {
+			compatible = "shared-dma-pool";
+			reusable;
+			alignment = <0x00 0x400000>;
+			size = <0x00 0x7000000>;
+		};
+
+		/* Disabled due to memory danger zone concerns
+		qseecom_region {
+			compatible = "shared-dma-pool";
+			reusable;
+			alignment = <0x00 0x400000>;
+			size = <0x00 0x1000000>;
+		};
+		*/
+
+		adsp_region {
+			compatible = "shared-dma-pool";
+			reusable;
+			alignment = <0x00 0x400000>;
+			size = <0x00 0x400000>;
+		};
+
+		splash_reserved: splash_reserved@a8000000 {
+			reg = <0x00 0xa8000000 0x00 0x1000>;
+			no-map;
+		};
+
+		splash_region: splash_region@a8001000 {
+			/* У T385 стоковый splash = 0xa8000000 + 0x300000 (3 МБ),
+			   у T380 было 4 МБ. Первая страница отдана под splash_reserved. */
+			reg = <0x00 0xa8001000 0x00 0x2ff000>;
+			iommu-addresses = <&apps_iommu 0x15 0x00 0xa8001000 0x00 0x400000>;
+			no-map;
+		};
+
+		/* Disabled due to memory danger zone concerns
+		ss_plog@85c00000 {
+			compatible = "ss_plog";
+			no-map;
+			reg = <0x00 0x85c00000 0x00 0x400000>;
+		};
+		*/
+
+		lk_region@8f600000 {
+			no-map;
+			reg = <0x00 0x8f600000 0x00 0x300000>;
+		};
+
+		modem_shared_mem_region@93000000 {
+			compatible = "removed-dma-pool";
+			no-map;
+			reg = <0x00 0x93000000 0x00 0x6000000>;
+		};
+
+		/* The Great Shield (Pre): Protects Danger Zone up to Splash (0x99000000 - 0xa8000000) */
+		danger_zone_pre: danger_zone_pre@99000000 {
+			compatible = "removed-dma-pool";
+			no-map;
+			reg = <0x00 0x99000000 0x00 0x0f000000>;
+		};
+
+		/* Щит после splash: закрывает 0xa8300000 .. 0xaf980000 (до ramoops) */
+		danger_zone_post: danger_zone_post@a8300000 {
+			compatible = "removed-dma-pool";
+			no-map;
+			reg = <0x00 0xa8300000 0x00 0x07680000>;
+		};
+	};
+
+	reg_cam_vana: regulator-cam-vana {
+		compatible = "regulator-fixed";
+		regulator-name = "cam_vana";
+		regulator-min-microvolt = <2800000>;
+		regulator-max-microvolt = <2800000>;
+		/* Проверено: ключ ВЫСОКИМ (с низким поток умирает) */
+		gpio = <&tlmm 88 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+	};
+
+	reg_cam_vdig: regulator-cam-vdig {
+		compatible = "regulator-fixed";
+		regulator-name = "cam_vdig";
+		regulator-min-microvolt = <1200000>;
+		regulator-max-microvolt = <1200000>;
+		gpio = <&tlmm 89 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+	};
+
+	reg_cam_vio: regulator-cam-vio {
+		compatible = "regulator-fixed";
+		regulator-name = "cam_vio";
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+		gpio = <&tlmm 39 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+	};
+
+	reg_vbus_fixed: regulator-vbus-fixed {
+		compatible = "regulator-fixed";
+		regulator-name = "vbus_fixed";
+		regulator-min-microvolt = <5000000>;
+		regulator-max-microvolt = <5000000>;
+		regulator-always-on;
+		regulator-boot-on;
+	};
+
+	tlmm94_vreg: tlmm94_vreg {
+		compatible = "regulator-fixed";
+		regulator-name = "tlmm94_vreg";
+		gpio = <&tlmm 94 0>;
+		enable-active-high;
+		regulator-boot-on;
+		regulator-always-on;
+	};
+
+	pericom_en: pericom_en {
+		compatible = "regulator-fixed";
+		regulator-name = "pericom_en";
+		gpio = <&tlmm 131 1>; /* GPIO_ACTIVE_LOW */
+		enable-active-low;
+		regulator-boot-on;
+		regulator-always-on;
+	};
+
+	usb_hub_en: usb_hub_en {
+		compatible = "regulator-fixed";
+		regulator-name = "usb_hub_en";
+		gpio = <&tlmm 100 0>; /* GPIO_ACTIVE_HIGH */
+		enable-active-high;
+		regulator-boot-on;
+		regulator-always-on;
+	};
+
+	eldo2: eldo2 {
+		compatible = "regulator-fixed";
+		regulator-name = "eldo2";
+		gpio = <&pm8937_gpios 7 0>;
+		regulator-min-microvolt = <2900000>;
+		regulator-max-microvolt = <2900000>;
+		enable-active-high;
+		regulator-boot-on;
+		regulator-always-on;
+	};
+
+	tsp_io: tsp_io {
+		compatible = "regulator-fixed";
+		regulator-name = "tsp_io";
+		gpio = <&tlmm 91 0>;
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+		enable-active-high;
+		regulator-boot-on;
+		regulator-always-on;
+	};
+
+	tsp_avdd: tsp_avdd {
+		compatible = "regulator-fixed";
+		regulator-name = "tsp_avdd";
+		gpio = <&tlmm 92 0>;
+		regulator-min-microvolt = <3000000>;
+		regulator-max-microvolt = <3000000>;
+		enable-active-high;
+		regulator-boot-on;
+		regulator-always-on;
+	};
+
+	lcd_vddlcd: lcd-vddlcd {
+		/*
+		 * Питание цепей смещения матрицы (в стоке msmgpio8_vreg).
+		 * Всегда включено, как и в стоке: панель без него не светится.
+		 */
+		compatible = "regulator-fixed";
+		regulator-name = "lcd_vddlcd";
+		gpio = <&tlmm 8 0>;
+		enable-active-high;
+		regulator-boot-on;
+		regulator-always-on;
+	};
+
+	lcd_vsp: lcd-vsp {
+		/* Второе смещение матрицы (в стоке msmgpio87_vreg). */
+		compatible = "regulator-fixed";
+		regulator-name = "lcd_vsp";
+		gpio = <&tlmm 87 0>;
+		enable-active-high;
+		regulator-boot-on;
+		regulator-always-on;
+	};
+
+	psci {
+		compatible = "arm,psci-1.0";
+		method = "smc";
+	};
+
+	i2c_11: i2c-11 {
+		status = "disabled";
+	};
+
+	i2c_22: i2c-22 {
+		compatible = "i2c-gpio";
+		gpios = <&tlmm 20 0 &tlmm 21 0>; /* SDA = 20, SCL = 21 */
+		i2c-gpio,delay-us = <10>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&i2c_22_pins>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		accelerometer@1d {
+			compatible = "st,lis2hh12";
+			reg = <0x1d>;
+			interrupt-parent = <&tlmm>;
+			interrupts = <42 IRQ_TYPE_EDGE_RISING>;
+			/*
+			 * Датчик установлен на плате с разворотом на 180°
+			 * относительно экрана: без матрицы phosh поворачивал
+			 * изображение вверх ногами. Инвертируем X и Y.
+			 */
+			mount-matrix = "-1", "0", "0",
+				       "0", "-1", "0",
+				       "0", "0", "1";
+		};
+	};
+
+	sec-debug {
+		crash_key {
+			keys = <0x72 0x74 0x74>;
+			size-keys = <0x03>;
+			timeout = <0x3e8>;
+			function = "keycrash";
+		};
+	};
+
+	input_booster {
+		status = "okay";
+		compatible = "input_booster";
+		#address-cells = <0x01>;
+		#size-cells = <0x00>;
+		booster_key_1 {
+			input_booster,label = "KEY";
+			input_booster,type = <0x00>;
+			input_booster,levels = <0x01>;
+			input_booster,cpu_freqs = <0x10b300>;
+			input_booster,hmp_boost = <0x01>;
+			input_booster,bimc_freqs = <0x00>;
+			input_booster,head_times = <0x1f4>;
+			input_booster,tail_times = <0x1f4>;
+		};
+		booster_key_2 {
+			input_booster,label = "TOUCHKEY";
+			input_booster,type = <0x01>;
+			input_booster,levels = <0x01>;
+			input_booster,cpu_freqs = <0x10b300>;
+			input_booster,hmp_boost = <0x00>;
+			input_booster,bimc_freqs = <0x00>;
+			input_booster,head_times = <0x00>;
+			input_booster,tail_times = <0x1f4>;
+		};
+		booster_key_3 {
+			input_booster,label = "TOUCH";
+			input_booster,type = <0x02>;
+			input_booster,levels = <0x01 0x02 0x03>;
+			input_booster,cpu_freqs = <0x130b00 0x130b00 0x10b300>;
+			input_booster,hmp_boost = <0x01 0x01 0x00>;
+			input_booster,bimc_freqs = <0x00 0x00 0x00>;
+			input_booster,head_times = <0xc8 0xc8 0x00>;
+			input_booster,tail_times = <0x00 0x00 0x12c>;
+		};
+		booster_key_4 {
+			input_booster,label = "MULTITOUCH";
+			input_booster,type = <0x03>;
+			input_booster,levels = <0x01 0x02>;
+			input_booster,cpu_freqs = <0x1560a8 0x130b00>;
+			input_booster,hmp_boost = <0x01 0x01>;
+			input_booster,bimc_freqs = <0x00 0x00>;
+			input_booster,head_times = <0x12c 0x00>;
+			input_booster,tail_times = <0x00 0x2bc>;
+		};
+		booster_key_6 {
+			input_booster,label = "MOUSE";
+			input_booster,type = <0x05>;
+			input_booster,levels = <0x01 0x02>;
+			input_booster,cpu_freqs = <0x130b00 0x10b300>;
+			input_booster,hmp_boost = <0x01 0x00>;
+			input_booster,bimc_freqs = <0x00 0x00>;
+			input_booster,head_times = <0xc8 0x00>;
+			input_booster,tail_times = <0x00 0x12c>;
+		};
+		booster_key_7 {
+			input_booster,label = "MOUSE WHEEL";
+			input_booster,type = <0x06>;
+			input_booster,levels = <0x01 0x02>;
+			input_booster,cpu_freqs = <0x130b00 0x00>;
+			input_booster,hmp_boost = <0x01 0x00>;
+			input_booster,bimc_freqs = <0x00 0x00>;
+			input_booster,head_times = <0xc8 0x00>;
+			input_booster,tail_times = <0x00 0x00>;
+		};
+		booster_key_8 {
+			input_booster,label = "PEN HOVER";
+			input_booster,type = <0x07>;
+			input_booster,levels = <0x01 0x02>;
+			input_booster,cpu_freqs = <0x130b00 0x10b300>;
+			input_booster,hmp_boost = <0x01 0x00>;
+			input_booster,bimc_freqs = <0x00 0x00>;
+			input_booster,head_times = <0xc8 0x00>;
+			input_booster,tail_times = <0x00 0x12c>;
+		};
+	};
+
+	firmware {
+		android {
+			compatible = "android,firmware";
+			fstab {
+				compatible = "android,fstab";
+				vendor {
+					compatible = "android,vendor";
+					dev = "/dev/block/platform/soc/7824900.sdhci/by-name/vendor";
+					type = "ext4";
+					mnt_flags = "ro,barrier=1,discard";
+					fsmgr_flags = "wait,verify";
+					status = "disabled";
+				};
+				system {
+					compatible = "android,system";
+					dev = "/dev/block/platform/soc/7824900.sdhci/by-name/system";
+					type = "ext4";
+					mnt_flags = "ro,barrier=1,discard";
+					fsmgr_flags = "wait,verify";
+					status = "ok";
+				};
+			};
+		};
+	};
+
+	i2c_8: i2c-8 {
+		cell-index = <0x08>;
+		compatible = "i2c-gpio";
+		gpios = <&tlmm 16 0 &tlmm 17 0>;
+		i2c-gpio,delay-us = <10>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&i2c_8_pins>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		muic: muic@25 {
+			compatible = "siliconmitus,sm5703-muic";
+			reg = <0x25>;
+			interrupt-parent = <&tlmm>;
+			interrupts = <28 IRQ_TYPE_EDGE_FALLING>;
+			switch-gpios = <&tlmm 40 0>;
+		};
+	};
+
+	i2c_12: i2c-12 {
+		cell-index = <0x0c>;
+		compatible = "i2c-gpio";
+		gpios = <&tlmm 18 0 &tlmm 19 0>;
+		i2c-gpio,delay-us = <10>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&i2c_12_pins>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		sm5703mfd@49 {
+			compatible = "siliconmitus,sm5703mfd";
+			reg = <0x49>;
+			/* Фонарик того же чипа. У FLED два пина включения:
+			 * GPIO34 = movie/фонарик (ток IMLED, регулируемый),
+			 * GPIO33 = вспышка (фиксированный ток IFLED). Для
+			 * фонарика нужен именно 34 — проверено: с 33 яркость
+			 * не регулируется. Драйвер sm5703-charger (патч 0002). */
+			flash-enable-gpios = <&tlmm 34 GPIO_ACTIVE_HIGH>;
+
+			interrupt-parent = <&tlmm>;
+			interrupts = <35 IRQ_TYPE_EDGE_FALLING>;
+			interrupt-controller;
+			#interrupt-cells = <1>;
+
+			regulators {
+				compatible = "siliconmitus,sm5703-regulator";
+				sm5703_usbldo1: usbldo1 {
+					regulator-name = "USBLDO1";
+					regulator-always-on;
+				};
+
+				sm5703_usbldo2: usbldo2 {
+					regulator-name = "USBLDO2";
+				};
+
+				sm5703_ldo1: ldo1 {
+					regulator-name = "VCC_1.8V_AP";
+					regulator-min-microvolt = <1800000>;
+					regulator-max-microvolt = <1800000>;
+				};
+
+				sm5703_ldo2: ldo2 {
+					regulator-name = "VCC_3.0V_AP";
+					regulator-min-microvolt = <3000000>;
+					regulator-max-microvolt = <3000000>;
+				};
+
+				sm5703_ldo3: ldo3 {
+					regulator-name = "VCC_2.8V_AP";
+					regulator-min-microvolt = <2800000>;
+					regulator-max-microvolt = <2800000>;
+				};
+
+				sm5703_buck: buck {
+					regulator-name = "VCC_1.2V_AP";
+					regulator-min-microvolt = <1200000>;
+					regulator-max-microvolt = <1200000>;
+				};
+
+				sm5703_vbus: vbus {
+					regulator-name = "VBUS_BOOST";
+					regulator-min-microvolt = <5000000>;
+					regulator-max-microvolt = <5000000>;
+				};
+			};
+
+			charger {
+				compatible = "siliconmitus,sm5703-charger";
+				monitored-battery = <&sm5703_battery>;
+				extcon = <&muic>;
+			};
+		};
+	};
+
+	/*
+	 * МОДЕМ ВКЛЮЧЁН (см. &modem внизу файла). У T385 в стоке
+	 * qcom,mss@4080000 (qcom,pil-q6v55-mss); mainline-узел —
+	 * remoteproc@4080000 (qcom,msm8917-mss-pil). Память: &mpss_mem
+	 * по стоковому адресу/размеру, &mba_mem — мегабайт, отрезанный
+	 * от щита 0x8e100000. Питание mss/pll — как у msm8917-xiaomi-*
+	 * (S1/L7 того же PM8937). Прошивку (mba.mbn, modem.*) отдаёт
+	 * msm-firmware-loader со стокового раздела "modem" (vfat).
+	 * Сеть — BAM-DMUX (bam_dmux + выделенный DMA), управление —
+	 * QMI через QRTR/SMD.
+	 */
+
+	soc {
+		sec_smem {
+			compatible = "samsung,sec-smem";
+			status = "okay";
+		};
+	};
+};
+
+&blsp1_uart2 {
+	status = "okay";
+};
+
+&blsp1_i2c3 {
+        status = "okay";
+        clock-frequency = <400000>;
+        pinctrl-names = "default";
+        pinctrl-0 = <&blsp1_i2c3_default>;
+
+        touchscreen@49 {		compatible = "st,stmfts";
+		reg = <0x49>;
+		interrupt-parent = <&tlmm>;
+		interrupts = <65 IRQ_TYPE_LEVEL_LOW>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&tsp_int_default>;
+		vdd-supply = <&tsp_io>;
+		avdd-supply = <&tsp_avdd>;
+		/*
+		 * Линии сброса у этого тачскрина нет.
+		 *
+		 * reset-gpios достался от донорского дерева, но в стоковом
+		 * дереве Samsung (touchscreen@49, compatible "stm,fts_touch")
+		 * никакого сброса не описано: только два питания tsp_io и
+		 * tsp_avdd и прерывание stm,irq_gpio = <&tlmm 65>. Драйвер
+		 * stmfts к линиям ввода-вывода вообще не обращается, так что
+		 * свойство было мёртвым.
+		 *
+		 * Размеры сходятся со стоком: stm,max_coords = <0x640 0xa00>
+		 * это 1600 x 2560.
+		 */
+		touchscreen-size-x = <1600>;
+		touchscreen-size-y = <2560>;
+		touch-key-connected;
+	};
+};
+
+&tlmm {
+	gpio_keys_default: gpio-keys-default-state {
+		pins = "gpio46", "gpio127", "gpio128";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-pull-up;
+	};
+
+	gpio_keys_sleep: gpio-keys-sleep-state {
+		pins = "gpio46", "gpio127", "gpio128";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
+
+	tsp_int_default: tsp-int-default-state {
+		pins = "gpio65", "gpio64";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-pull-up;
+	};
+
+
+
+
+
+	sdc2_cd_default: sdc2-cd-default-state {
+		pins = "gpio67";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-pull-up;
+	};
+
+	sdc2_cd_sleep: sdc2-cd-sleep-state {
+		pins = "gpio67";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
+
+	i2c_8_pins: i2c-8-pins {
+		pins = "gpio16", "gpio17";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-pull-up;
+	};
+
+	i2c_11_pins: i2c-11-pins {
+		pins = "gpio6", "gpio7";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-pull-up;
+	};
+
+	i2c_12_pins: i2c-12-pins {
+		pins = "gpio18", "gpio19";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-pull-up;
+	};
+
+	i2c_22_pins: i2c-22-pins {
+		pins = "gpio20", "gpio21";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-pull-up;
+	};
+
+	blsp1_i2c4_reset: blsp1-i2c4-reset {
+		pins = "gpio14", "gpio15";
+		function = "gpio";
+		drive-strength = <6>;
+		bias-pull-down;
+		output-low;
+	};
+};
+
+&blsp1_i2c4_default {
+	pins = "gpio14", "gpio15";
+	drive-strength = <2>;
+	bias-pull-up;
+};
+
+&blsp1_i2c4_sleep {
+	pins = "gpio14", "gpio15";
+	drive-strength = <2>;
+	bias-disable;
+};
+
+/*
+ * Описания выводов sdc1/sdc2 удалены.
+ *
+ * Драйвер выводов ругался на каждую запись:
+ *   msm8917-pinctrl 1000000.pinctrl: invalid function sdc1 in map table
+ *   msm8917-pinctrl 1000000.pinctrl: invalid function sdc2 in map table
+ * и загрузка вставала на "sdhci_msm 7864900.mmc: Got CD GPIO".
+ *
+ * На msm8917 линии карты памяти выделенные и не мультиплексируются,
+ * поэтому таких функций в драйвере нет вовсе. Настройка приходила
+ * из DTS донора и на этом ядре не применима — контроллер настраивается
+ * сам, без явного описания выводов.
+ */
+&sdhc_1 {
+	/*
+	 * Питание — как у msm8917-xiaomi-riva и msm8917-huawei-agassi.
+	 *
+	 * Таблица рабочих точек добавлена здесь, потому что в msm8917.dtsi
+	 * её у sdhc_1 нет, а драйвер задаёт частоту только через механизм
+	 * OPP: msm_set_clock_rate_for_bus_mode() вызывает
+	 * dev_pm_opp_set_rate(), после чего читает clk_get_rate(core_clk).
+	 * Без таблицы вызов проходит без ошибки, но частота остаётся нулевой
+	 * — в журнале "Setting clock at rate 0 at timing 0", и все команды
+	 * с ответом истекают по тайм-ауту (-110), включая CMD1. CMD0 при
+	 * этом "успешен", потому что ответа не требует.
+	 *
+	 * Набор частот взят из стокового дерева Samsung (qcom,clk-rates),
+	 * привязка к уровням домена питания — по образцу msm8953.dtsi.
+	 * Поля пропускной способности намеренно опущены: у sdhc_1 в msm8917
+	 * нет свойства interconnects, задавать для него полосу не по чему.
+	 */
+	vmmc-supply = <&pm8937_l8>;
+	vqmmc-supply = <&pm8937_l5>;
+	operating-points-v2 = <&sdhc1_opp_table>;
+
+	status = "okay";
+
+	sdhc1_opp_table: opp-table-sdhc1 {
+		compatible = "operating-points-v2";
+
+		/*
+		 * Нижние точки обязательны.
+		 *
+		 * Ядро при опознании карты просит 400 кГц. Если самая низкая
+		 * точка таблицы — 25 МГц, запрос округляется вверх к ней же,
+		 * а подсистема OPP считает текущей точкой самую нижнюю (когда
+		 * clk_get_rate ей ничего внятного не вернул). Цель совпадает с
+		 * «текущей», OPP решает, что делать нечего, и частота остаётся
+		 * той, что оставил загрузчик, — 384 МГц. По спецификации eMMC
+		 * на такой частоте отвечать не обязана: в журнале -110 на всех
+		 * командах с ответом и "Failed to initialize a non-removable
+		 * card". CMD0 при этом проходит, потому что ответа не требует.
+		 *
+		 * Набор частот — из ftbl_sdcc1_apps_clk_src драйвера
+		 * gcc-msm8917 и qcom,clk-rates стокового дерева Samsung.
+		 */
+		opp-144000 {
+			opp-hz = /bits/ 64 <144000>;
+			required-opps = <&rpmpd_opp_low_svs>;
+		};
+
+		opp-400000 {
+			opp-hz = /bits/ 64 <400000>;
+			required-opps = <&rpmpd_opp_low_svs>;
+		};
+
+		opp-20000000 {
+			opp-hz = /bits/ 64 <20000000>;
+			required-opps = <&rpmpd_opp_low_svs>;
+		};
+
+		opp-25000000 {
+			opp-hz = /bits/ 64 <25000000>;
+			required-opps = <&rpmpd_opp_low_svs>;
+		};
+
+		opp-50000000 {
+			opp-hz = /bits/ 64 <50000000>;
+			required-opps = <&rpmpd_opp_svs>;
+		};
+
+		opp-100000000 {
+			opp-hz = /bits/ 64 <100000000>;
+			required-opps = <&rpmpd_opp_svs>;
+		};
+
+		opp-192000000 {
+			opp-hz = /bits/ 64 <192000000>;
+			required-opps = <&rpmpd_opp_nom>;
+		};
+
+		opp-384000000 {
+			opp-hz = /bits/ 64 <384000000>;
+			required-opps = <&rpmpd_opp_nom>;
+		};
+	};
+};
+
+&sdhc_2 {
+	/*
+	 * Слот SD-карты временно выключен: ядро молча умирало сразу
+	 * после "7864900.mmc: Got CD GPIO". Проверяем, он ли виновник.
+	 * Корень лежит на eMMC (sdhc_1), загрузке это не мешает.
+	 */
+	status = "disabled";
+};
+
+/*
+ * Звуковой сопроцессор ADSP. Прошивку (adsp.mdt + adsp.b00..b15) достаёт
+ * из стокового раздела служба msm-firmware-loader и подставляет ядру
+ * через /run/msm-firmware-loader/target — путь уже прописан initramfs.
+ * Без ADSP звукового тракта на msm89x7 нет вовсе: карта строится на
+ * потоках q6 (msm8937-qdsp6.dtsi), и "No soundcards found" именно отсюда.
+ */
+&adsp {
+	status = "okay";
+};
+
+/*
+ * Память ADSP — стоковая область T385 (24 МБ на 0x8c200000). В msm8917.dtsi
+ * узел описан динамическим выделением из окна, закрытого у нас защитными
+ * областями, поэтому адрес задаём явно.
+ */
+&adsp_mem {
+	reg = <0x0 0x8c200000 0x0 0x1800000>;
+	/delete-property/ size;
+	/delete-property/ alignment;
+	/delete-property/ alloc-ranges;
+	status = "okay";
+};
+
+&apr {
+	status = "okay";
+};
+
+/*
+ * Память модема: mpss — стоковая область T385 (0x5a00000 на 0x86800000),
+ * mba — мегабайт, отрезанный от начала бывшего щита 0x8e100000.
+ * В msm8917.dtsi обе описаны динамическим выделением — задаём явно.
+ */
+&mpss_mem {
+	reg = <0x0 0x86800000 0x0 0x5a00000>;
+	status = "okay";
+};
+
+&mba_mem {
+	reg = <0x0 0x8e100000 0x0 0x100000>;
+	/delete-property/ size;
+	/delete-property/ alignment;
+	/delete-property/ alloc-ranges;
+	status = "okay";
+};
+
+&modem {
+	mss-supply = <&pm8937_s1>;
+	pll-supply = <&pm8937_l7>;
+	status = "okay";
+};
+
+/*
+ * КАМЕРЫ — этап разведки. CCI (шина управления сенсорами) включена,
+ * чтобы опросить чипы и определить модели. Стоковая карта (r05):
+ *   тыл (CSI0):  mclk GPIO26, VANA GPIO88, RESET GPIO36, VDIG GPIO89,
+ *                VIO GPIO39, VAF = L10 2.8В; актуатор dw9807 @0x18,
+ *                EEPROM @0x50; CCI master 0, поворот 90°.
+ *   фронт (CSI1): mclk GPIO27, RESET GPIO38, VIO GPIO39 (общий),
+ *                VANA = L22 2.8В, VDIG = L23 1.2В; CCI master 0, 270°.
+ */
+&cci {
+	/* Ножки MCLK0/1 (GPIO26/27) муксуются здесь же в cam_mclk */
+	pinctrl-0 = <&cci0_default>, <&cci1_default>, <&cam_mclk_default>;
+	pinctrl-names = "default";
+	/* Без GDSC блок CCI не отвечает (транзакции таймаутятся, пока
+	 * camss не начнёт стрим и не включит домен сам) — проверено на
+	 * живом устройстве: без этого dw9807 не пробится на загрузке. */
+	power-domains = <&gcc VFE0_GDSC>;
+	status = "okay";
+};
+
+&cci_i2c0 {
+	/* Тыловая камера Samsung S5K4H5 (8 Мп), chip ID 0x485B. */
+	rear_cam: camera-sensor@37 {
+		compatible = "samsung,s5k4h5";
+		reg = <0x37>;
+
+		clocks = <&gcc GCC_CAMSS_MCLK0_CLK>;
+
+		reset-gpios = <&tlmm 36 GPIO_ACTIVE_LOW>;
+
+		vana-supply = <&reg_cam_vana>;
+		vdig-supply = <&reg_cam_vdig>;
+		vio-supply = <&reg_cam_vio>;
+
+		lens-focus = <&rear_cam_focus>;
+
+		orientation = <1>;
+		rotation = <90>;
+
+		port {
+			rear_cam_ep: endpoint {
+				data-lanes = <0 1 2 3>;
+				remote-endpoint = <&csiphy0_ep>;
+				link-frequencies = /bits/ 64 <346000000>;
+			};
+		};
+	};
+
+	/* Фронтальная камера Samsung S5K5E3 (5 Мп). Опознана по chip ID
+	 * 0x5E30 на живом устройстве; питание по стоковой карте r05. */
+	front_cam: camera-sensor@10 {
+		compatible = "samsung,s5k5e3";
+		reg = <0x10>;
+
+		clocks = <&gcc GCC_CAMSS_MCLK1_CLK>;
+
+		/* RESET активен НИЗКИМ уровнем на ножке в терминах gpiod:
+		 * физически сенсор работает при высоком — ACTIVE_LOW тут
+		 * означает «сброс = 0 на линии» */
+		reset-gpios = <&tlmm 38 GPIO_ACTIVE_LOW>;
+
+		vana-supply = <&pm8937_l22>;
+		vdig-supply = <&pm8937_l23>;
+		vio-supply = <&reg_cam_vio>;
+
+		orientation = <0>;
+		rotation = <270>;
+
+		port {
+			front_cam_ep: endpoint {
+				data-lanes = <0 1>;
+				remote-endpoint = <&csiphy1_ep>;
+				link-frequencies = /bits/ 64 <448000000>;
+			};
+		};
+	};
+};
+
+&cci_i2c1 {
+	/* Актуатор автофокуса тыловой камеры (питание VAF = L10,
+	 * держится always-on — см. узел l10). EEPROM модуля @0x58
+	 * на этой же шине, пока не подключён. */
+	rear_cam_focus: dw9807@c {
+		compatible = "dongwoon,dw9807-vcm";
+		reg = <0x0c>;
+		/* От cam_vio (GPIO39) питаются подтяжки шины CCI1 —
+		 * без неё I2C к актуатору мёртв (наш патч 0011). */
+		vdd-supply = <&reg_cam_vio>;
+	};
+};
+
+&camss {
+	vdda-supply = <&pm8937_l2>;
+	status = "okay";
+
+	ports {
+		port@0 {
+			reg = <0>;
+
+			csiphy0_ep: endpoint {
+				clock-lanes = <7>;
+				data-lanes = <0 1 2 3>;
+				remote-endpoint = <&rear_cam_ep>;
+			};
+		};
+
+		port@1 {
+			reg = <1>;
+
+			csiphy1_ep: endpoint {
+				clock-lanes = <7>;
+				data-lanes = <0 1>;
+				remote-endpoint = <&front_cam_ep>;
+			};
+		};
+	};
+};
+
+&tlmm {
+	cam_mclk_default: cam-mclk-default-state {
+		pins = "gpio26", "gpio27";
+		function = "cam_mclk";
+		drive-strength = <8>;
+		bias-disable;
+	};
+};
+
+&bam_dmux {
+	status = "okay";
+};
+
+&bam_dmux_dma {
+	/*
+	 * В стоковом дереве прерывание A2 BAM объявлено EDGE_RISING;
+	 * с LEVEL_HIGH из msm8917.dtsi обработчик не видит события —
+	 * передачи DMA никогда не завершаются (данные стоят в очереди
+	 * при живом рукопожатии pc/pc-ack).
+	 */
+	interrupts = <GIC_SPI 162 IRQ_TYPE_EDGE_RISING>;
+	status = "okay";
+};
+
+&venus {
+	status = "okay";
+};
+
+/*
+ * Память видеодекодера — стоковая область T385 (4 МБ на 0x8fc00000).
+ * В msm8917.dtsi узел описан динамическим выделением из окна модема,
+ * но у нас всё это окно закрыто защитными областями, поэтому задаём
+ * адрес явно.
+ */
+&venus_mem {
+	reg = <0x0 0x8fc00000 0x0 0x400000>;
+	/delete-property/ size;
+	/delete-property/ alignment;
+	/delete-property/ alloc-ranges;
+	status = "okay";
+};
+
+&gpu {
+	/*
+	 * Adreno 306 (в маркетинге — 308). Прошивки a300_pfp/a300_pm4
+	 * ставятся пакетом linux-firmware-qcom, отрисовщик — freedreno
+	 * (msm_dri.so). Без этого узла msm_dpu пишет "no GPU device was
+	 * found" и композитору остаётся программная отрисовка.
+	 */
+	status = "okay";
+};
+
+&mdss {
+	/*
+	 * Дисплейный блок включён: экран работает через драйвер msm
+	 * (DRM), а не через кадровый буфер загрузчика. Это даёт
+	 * аппаратную отрисовку, управление яркостью и гашение экрана.
+	 * При запуске msm сам забирает буфер у simpledrm.
+	 */
+	status = "okay";
+};
+
+&mdss_dsi0_phy {
+	status = "okay";
+	qcom,dsi-phy-regulator-ldo-mode;
+	vdda-supply = <&pm8937_l2>;
+	vcca-supply = <&pm8937_l2>;
+	vddio-supply = <&pm8937_l6>;
+};
+
+&usb_hs_phy {
+	status = "okay";
+	vdd-supply = <&pm8937_l2>;
+	vdda1p8-supply = <&pm8937_l7>;
+	vdda3p3-supply = <&pm8937_l13>;
+};
+
+&usb {
+	status = "okay";
+
+	/*
+	 * extcon вернулся.
+	 *
+	 * Раньше с extcon = <&muic> ядро падало на probe этого узла, и я
+	 * его убрал. Причина была не в extcon: DTB собирался деревом ядра
+	 * 6.17, тогда как на устройстве работает 7.1.3, и номера тактовых
+	 * сигналов разошлись — драйверы трогали чужие сигналы. Сейчас DTB
+	 * собран правильным деревом, и MUIC на шине определяется.
+	 *
+	 * Без extcon контроллер не знает о подключении кабеля и не
+	 * подтягивает линию D+, поэтому гаджет создаётся, но компьютер
+	 * планшета не видит.
+	 *
+	 * Роль оставляем периферийной: хозяином шины планшету быть не
+	 * нужно, а для OTG потребовался бы ещё регулятор vbus.
+	 */
+	dr_mode = "peripheral";
+	extcon = <&muic>;
+	usb-phy = <&usb_hs_phy>;
+};
+
+&blsp1_i2c2 {
+	status = "okay";
+
+	sm5703-fuelgauge@71 {
+		compatible = "siliconmitus,sm5703-fg";
+		reg = <0x71>;
+		interrupt-parent = <&tlmm>;
+		interrupts = <63 IRQ_TYPE_EDGE_FALLING>;
+		monitored-battery = <&sm5703_battery>;
+		status = "okay";
+	};
+};
+
+&blsp1_i2c4 {
+	status = "okay";
+	clock-frequency = <100000>;
+	pinctrl-names = "default", "sleep", "hard_reset";
+	pinctrl-0 = <&blsp1_i2c4_default>;
+	pinctrl-1 = <&blsp1_i2c4_sleep>;
+	pinctrl-2 = <&blsp1_i2c4_reset>;
+
+	s2mm005: s2mm005@33 {
+		compatible = "samsung,s2mm005";
+		reg = <0x33>;
+		interrupt-parent = <&tlmm>;
+		interrupts = <48 IRQ_TYPE_LEVEL_LOW>;
+	};
+};
+&mdss_dsi0 {
+
+    status = "okay";
+
+    vdda-supply = <&pm8937_l2>;
+
+    vddio-supply = <&pm8937_l6>;
+
+    vdd-supply = <&pm8937_l17>;
+
+    vddlcd-supply = <&pm8937_l15>;
+
+    vsp-supply = <&eldo2>;
+
+    phys = <&mdss_dsi0_phy>;
+
+
+
+    dsi_panel: panel@0 {
+
+				/* BOE TV080WXM-WXGA (Controller: Samsung S6D7AA0) */
+				/* Ported from legacy/apq8017-samsung-gta2swifi-rev3.dts ss_dsi_panel_S6D7AA0X11_TV080WXM_WXGA */
+				compatible = "samsung,s6d7aa0x11-tv080wxm", "lk2nd,panel";
+				reg = <0>;
+
+				/*
+				 * Питание, которое читает драйвер panel-samsung-s6d7aa0:
+				 * "power" — аналоговое 2.85 В (в стоке vdd = pm8917_l17),
+				 * "vmipi" — 1.8 В (в стоке vddio = pm8917_l6).
+				 * Смещение матрицы (VSP/VSN) держат линии GPIO 8 и 87 —
+				 * они описаны отдельными регуляторами ниже по файлу.
+				 */
+				power-supply = <&pm8937_l17>;
+				vmipi-supply = <&pm8937_l6>;
+
+				/* Standard Properties */
+				samsung,panel-vendor = "BOE";
+				reset-gpios = <&tlmm 60 1>;
+
+				/* DSI Properties */
+				qcom,mdss-dsi-panel-name = "ss_dsi_panel_S6D7AA0X11_TV080WXM_WXGA";
+				qcom,mdss-dsi-panel-type = "dsi_video_mode";
+				qcom,mdss-dsi-panel-destination = "display_1";
+				qcom,cont-splash-enabled;
+				qcom,mdss-dsi-panel-framerate = <60>;
+				qcom,mdss-dsi-virtual-channel-id = <0>;
+				qcom,mdss-dsi-stream = <0>;
+							                            qcom,mdss-dsi-panel-width = <800>;
+							                                                    qcom,mdss-dsi-panel-height = <1280>;				
+				qcom,mdss-dsi-h-pulse-width = <8>;
+				qcom,mdss-dsi-h-back-porch = <144>;
+				qcom,mdss-dsi-h-front-porch = <36>;
+				qcom,mdss-dsi-h-sync-skew = <0>;
+				qcom,mdss-dsi-v-pulse-width = <12>;
+				qcom,mdss-dsi-v-back-porch = <28>;
+				qcom,mdss-dsi-v-front-porch = <28>;
+				qcom,mdss-dsi-h-left-border = <0>;
+				qcom,mdss-dsi-h-right-border = <0>;
+				qcom,mdss-dsi-v-top-border = <0>;
+				qcom,mdss-dsi-v-bottom-border = <0>;
+				qcom,mdss-dsi-bpp = <24>;
+				qcom,mdss-dsi-underflow-color = <0xff>;
+				qcom,mdss-dsi-border-color = <0>;
+				qcom,mdss-dsi-on-command-state = "dsi_lp_mode";
+				qcom,mdss-dsi-off-command-state = "dsi_hs_mode";
+				qcom,mdss-dsi-h-sync-pulse = <0>;
+				qcom,mdss-dsi-bllp-eof-power-mode;
+				qcom,mdss-dsi-bllp-power-mode;
+				qcom,mdss-dsi-panel-timings = <0x871e1400 0x42461828 0x25030400>;
+				qcom,mdss-dsi-t-clk-post = <0x04>;
+				qcom,mdss-dsi-t-clk-pre = <0x1b>;
+				qcom,mdss-dsi-bl-min-level = <1>;
+				qcom,mdss-dsi-bl-max-level = <255>;
+				qcom,mdss-brightness-max-level = <255>;
+				qcom,mdss-dsi-dma-trigger = "trigger_sw";
+				qcom,mdss-dsi-mdp-trigger = "none";
+				qcom,mdss-dsi-bl-pmic-control-type = "bl_ctrl_dcs";
+				qcom,mdss-dsi-reset-sequence = <1 5 0 1 1 20>;
+				qcom,mdss-pan-physical-width-dimension = <108>;
+				qcom,mdss-pan-physical-height-dimension = <172>;
+				qcom,mdss-dsi-lp11-init;
+				qcom,mdss-dsi-init-delay-us = <20000>;
+				qcom,mdss-dsi-force-clock-lane-hs;
+				qcom,mdss-dsi-traffic-mode = "burst_mode";
+
+				/* Init Commands */
+				qcom,mdss-dsi-on-command = [39 01 00 00 00 00 03 f0 5a 5a 39 01 00 00 00 00 03 f1 5a 5a 39 01 00 00 00 00 03 fc a5 a5 39 01 00 00 00 00 03 d0 00 10 39 01 00 00 00 00 04 c3 c7 00 29 39 01 00 00 00 00 02 b3 51 39 01 00 00 00 00 02 53 24 39 01 00 00 00 00 02 51 7f 39 01 00 00 00 00 02 c1 01 39 01 00 00 0a 00 06 f2 02 28 1c 98 24 05 01 00 00 78 00 02 11 00 39 01 00 00 00 00 03 f0 a5 a5 39 01 00 00 00 00 03 f1 a5 a5 39 01 00 00 00 00 03 fc 5a 5a];
+				qcom,mdss-dsi-off-command = [05 01 00 00 00 00 02 28 00 05 01 00 00 82 00 02 10 00];
+				
+				port {
+					panel_in: endpoint {
+						remote-endpoint = <&mdss_dsi0_out>;
+					};
+				};
+			};
+
+
+};
+
+&mdss_dsi0_out {
+    remote-endpoint = <&panel_in>;
+    data-lanes = <0 1 2 3>;
+};
+
+&rpm_requests {
+	regulators-0 {
+		compatible = "qcom,rpm-pm8937-regulators";
+		pm8937_s1: s1 {
+			regulator-min-microvolt = <1000000>;
+			regulator-max-microvolt = <1225000>;
+		};
+		pm8937_s3: s3 {
+			regulator-min-microvolt = <1300000>;
+			regulator-max-microvolt = <1300000>;
+		};
+		pm8937_s4: s4 {
+			regulator-min-microvolt = <2050000>;
+			regulator-max-microvolt = <2050000>;
+		};
+		pm8937_l2: l2 {
+			regulator-min-microvolt = <1200000>;
+			regulator-max-microvolt = <1200000>;
+			regulator-always-on;
+			regulator-boot-on;
+		};
+		pm8937_l5: l5 {
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <1800000>;
+			regulator-always-on;
+			regulator-boot-on;
+		};
+		pm8937_l6: l6 {
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <1800000>;
+			regulator-always-on;
+			regulator-boot-on;
+		};
+		pm8937_l7: l7 {
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <1800000>;
+			regulator-always-on;
+			regulator-boot-on;
+		};
+		pm8937_l8: l8 {
+			regulator-min-microvolt = <2850000>;
+			regulator-max-microvolt = <2900000>;
+		};
+		pm8937_l3: l3 {
+			regulator-min-microvolt = <1000000>;
+			regulator-max-microvolt = <1225000>;
+		};
+		pm8937_l9: l9 {
+			regulator-min-microvolt = <3000000>;
+			regulator-max-microvolt = <3300000>;
+		};
+		pm8937_l10: l10 {
+			regulator-min-microvolt = <2800000>;
+			regulator-max-microvolt = <3000000>;
+			/* VAF тыловой камеры: EEPROM и актуатор dw9807.
+			 * Драйвер dw9807-vcm этого ядра не берёт vdd-supply,
+			 * поэтому держим рельсу включённой постоянно. */
+			regulator-always-on;
+		};
+		pm8937_l11: l11 {
+			regulator-min-microvolt = <2950000>;
+			regulator-max-microvolt = <2950000>;
+		};
+		pm8937_l12: l12 {
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <2950000>;
+		};
+		pm8937_l13: l13 {
+			regulator-min-microvolt = <3075000>;
+			regulator-max-microvolt = <3075000>;
+			regulator-always-on;
+			regulator-boot-on;
+		};
+		pm8937_l14: l14 {
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <3300000>;
+		};
+		pm8937_l15: l15 {
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <3300000>;
+			regulator-always-on;
+			regulator-boot-on;
+		};
+		pm8937_l16: l16 {
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <1800000>;
+		};
+		pm8937_l17: l17 {
+			regulator-min-microvolt = <2800000>;
+			regulator-max-microvolt = <2900000>;
+		};
+		pm8937_l19: l19 {
+			regulator-min-microvolt = <1225000>;
+			regulator-max-microvolt = <1350000>;
+		};
+		pm8937_l22: l22 {
+			regulator-min-microvolt = <2800000>;
+			regulator-max-microvolt = <2800000>;
+		};
+		pm8937_l23: l23 {
+			regulator-min-microvolt = <1200000>;
+			regulator-max-microvolt = <1200000>;
+		};
+	};
+};
+
+&soc {
+
+        sec_smem@0 {
+
+                compatible = "samsung,sec-smem";
+
+                status = "okay";
+
+        };
+
+};
+
+
+
+&sleep_clk {
+
+	clock-frequency = <32768>;
+
+};
+
+
+
+#include "gta2slte_wcnss_pronto.dtsi"
+
+&xo_board {
+        clock-frequency = <19200000>;
+};
+
+&pm8937_resin {
+	status = "okay";
+	linux,code = <KEY_VOLUMEDOWN>;
+};
+
+&pm8937_pwrkey {
+	status = "okay";
+};
+
+/* =========================================================================
+ * ЗВУК — Samsung SM-T385 (gta2slte)
+ *
+ * В порте-доноре T380 аудио помечено как незавершённое («ASoC/ALSA DTS
+ * bindings drafted, not yet verified»). Здесь оно доведено на основе
+ * разбора СТОКОВОГО DTS живого T385.
+ *
+ * Что даёт сток:
+ *   sound { compatible = "qcom,msm8952-audio-codec"; status = "okay"; }
+ *   asoc-codec-names = "msm-stub-codec.1", "cajon_codec"
+ *       -> "cajon" = внутренний кодек msm8x16_wcd в PMIC PM8937.
+ *          В mainline он разложен на две половины:
+ *            аналоговая  -> &wcd_codec   (qcom,pm8916-wcd-analog-codec)
+ *            цифровая    -> &lpass_codec (qcom,msm8916-wcd-digital-codec)
+ *   qcom,msm-mclk-freq = <9600000>
+ *   qcom,msm-hs-micbias-type = "internal"
+ *   qcom,msm-micbias1-ext-cap, qcom,msm-micbias2-ext-cap
+ *   qcom,audio-routing: AMIC1 = Handset Mic, AMIC2 = Secondary Mic,
+ *                       AMIC3 = Headset Mic
+ *   qcom,mainmic-bias-gpio = <&tlmm 68 0>
+ *   qcom,submic-bias-gpio  = <&tlmm 99 0>
+ *   sec_jack: detect-gpio = <&tlmm 61 0>, key-gpio = <&tlmm 93 0>
+ *
+ * Чего в стоке НЕТ (проверено, а не предположено):
+ *   - усилителя динамика на I2C: перебор всех compatible по tfa/tas2/max98/
+ *     aw87/nxp дал пусто;
+ *   - GPIO включения усилителя. Единственный похожий, spkr-sd-n-gpio на
+ *     GPIO 96, принадлежит узлу qcom,wsa881x внутри ветки sound-9335,
+ *     а она status = "disabled" — это вариант платы с кодеком WCD9335,
+ *     не наш.
+ *   Остаётся qcom,msm-ext-pa = "primary": динамик висит на primary MI2S
+ *   (SCK gpio85, SD0 gpio86, WS gpio87, SD1 gpio88, MCLK gpio25/69)
+ *   через усилитель без управляющей шины.
+ *
+ * Поэтому здесь включён путь, который полностью определён железом и
+ * проверяем: наушники и микрофоны через внутренний кодек. Динамик
+ * оставлен отдельным блоком ниже — его нужно подтвердить на устройстве,
+ * гадать про усилитель я не стал.
+ * ========================================================================= */
+
+&lpass_codec {
+	status = "okay";
+};
+
+&wcd_codec {
+	/*
+	 * Пороги MBHC определяют, как кодек различает вставленную гарнитуру
+	 * и нажатия её кнопок. Взяты типовые для msm8917 с внутренним
+	 * micbias — сток задаёт зоны своим драйвером sec_jack
+	 * (det-zones-list / but-zones-list), в mainline это делает MBHC.
+	 * При неверном срабатывании кнопок правятся именно эти два ряда.
+	 */
+	qcom,mbhc-vthreshold-low = <75 150 237 450 500>;
+	qcom,mbhc-vthreshold-high = <75 150 237 450 500>;
+
+	/* В стоке: qcom,msm-hs-micbias-type = "internal" */
+	qcom,hphl-jack-type-normally-open;
+
+	/* qcom,msm-micbias1-ext-cap в стоке */
+	qcom,micbias1-ext-cap;
+	/* qcom,msm-micbias2-ext-cap в стоке */
+	qcom,micbias2-ext-cap;
+
+	vdd-cdc-io-supply = <&pm8937_l5>;
+	vdd-cdc-tx-rx-cx-supply = <&pm8937_s4>;
+	vdd-micbias-supply = <&pm8937_l13>;
+
+	status = "okay";
+};
+
+&sound {
+	model = "samsung-gta2slte";
+
+	/*
+	 * Маршрутизация повторяет стоковую qcom,audio-routing:
+	 *   AMIC1 = Handset Mic (основной микрофон)
+	 *   AMIC2 = Secondary Mic (второй микрофон)
+	 *   AMIC3 = Headset Mic (микрофон гарнитуры)
+	 * MM_DL/MM_UL — потоки к ADSP, как у остальных msm8917 в mainline.
+	 */
+	widgets =
+		"Speaker", "Speaker",
+		"Headphone", "Headphones",
+		"Microphone", "Handset Mic",
+		"Microphone", "Secondary Mic",
+		"Microphone", "Headset Mic";
+
+	pin-switches = "Speaker", "Headphones";
+
+	/*
+	 * Динамик ведёт внешний усилитель, снимающий сигнал с LINEOUT
+	 * кодека (тракт добавлен нашим патчем 0005): в стоковой
+	 * маршрутизации усилитель управляется без шины (LINEOUT PA его и питает сигналом).
+	 *
+	 * Выходы наушников у драйвера msm8916-wcd-analog называются
+	 * HPH_L/HPH_R (с подчёркиванием) — с донорскими именами HPHL/HPHR
+	 * маршрут не собирался, и наушники молчали бы.
+	 */
+	audio-routing =
+		"Speaker", "SPK_OUT",
+		"Headphones", "HPH_L",
+		"Headphones", "HPH_R",
+		"AMIC1", "MIC BIAS External1",
+		"Handset Mic", "MIC BIAS External1",
+		"AMIC2", "MIC BIAS Internal2",
+		"Headset Mic", "MIC BIAS Internal2",
+		"AMIC3", "MIC BIAS External1",
+		"Secondary Mic", "MIC BIAS External1",
+		"MM_DL1", "MultiMedia1 Playback",
+		"MM_DL3", "MultiMedia3 Playback",
+		"MM_DL4", "MultiMedia4 Playback",
+		"MultiMedia2 Capture", "MM_UL2";
+
+	status = "okay";
+};
+
+/*
+ * ДИНАМИК — не включён намеренно.
+ *
+ * Сток говорит qcom,msm-ext-pa = "primary", то есть динамик подключён
+ * через внешний усилитель на primary MI2S. Ни I2C-устройства усилителя,
+ * ни GPIO его включения в стоковом DTS нет (см. разбор выше), поэтому
+ * тип усилителя по дереву не определяется.
+ *
+ * Чтобы поднять динамик, нужно на живом устройстве выяснить, чем он
+ * управляется. Порядок проверки:
+ *   1. Загрузиться с этим DTS, убедиться что наушники и микрофоны живы.
+ *   2. Посмотреть, звучит ли динамик сам по себе при выводе на
+ *      primary MI2S (усилитель может быть always-on):
+ *        speaker-test -D hw:0 -c 2 -t sine
+ *   3. Если нет — перебрать подозрительные GPIO через libgpiod:
+ *        gpioset gpiochip0 <N>=1
+ *      и повторить проверку. Кандидаты ищутся среди свободных линий
+ *      tlmm, не занятых другими узлами.
+ *   4. Когда линия найдена — раскомментировать блок ниже, подставив
+ *      номер, и добавить speaker_amp в aux-devs узла &sound.
+ *
+ * speaker_amp: audio-amplifier {
+ *	compatible = "simple-audio-amplifier";
+ *	enable-gpios = <&tlmm НОМЕР GPIO_ACTIVE_HIGH>;
+ *	sound-name-prefix = "Speaker Amp";
+ * };
+ *
+ * И в &sound:
+ *	aux-devs = <&speaker_amp>;
+ *	widgets = "Speaker", "Speaker";
+ *	audio-routing = "Speaker", "Speaker Amp OUT",
+ *			"Speaker Amp IN", "HPHR";
+ */
+
+/*
+ * DMA-контроллеры BLSP отключены.
+ *
+ * Ядро падало на них:
+ *   Internal error: synchronous external abort: 0000000096000010
+ *   pc : bam_dma_probe+0x1d8/0x554
+ *   Tainted: [M]=MACHINE_CHECK
+ *
+ * "Synchronous external abort" при probe означает обращение к регистрам
+ * BAM, которое аппаратура не пропускает: блок управляется из TrustZone
+ * и его тактирование на этой плате, судя по всему, не поднято к моменту
+ * запуска драйвера. Признак qcom,controlled-remotely в msm8917.dtsi
+ * уже стоит, но чтение регистров всё равно происходит.
+ *
+ * BLSP2 на этом устройстве не используется вовсе. Шины BLSP1 (i2c2, i2c3,
+ * i2c4, uart2) прекрасно работают без DMA, в режиме прямого ввода-вывода —
+ * медленнее, но для тачскрина, топливомера и USB-C это несущественно.
+ *
+ * Вернуть, когда разберёмся с тактированием BAM.
+ */
+/*
+ * BAM DMA включён.
+ *
+ * Раньше он был выключен: bam_dma_probe валил ядро внешним прерыванием
+ * шины на 0.310 с. Причина оказалась не в самом BAM, а в том, что DTB
+ * собирался деревом ядра 6.17, тогда как на устройстве работает 7.1.3.
+ * Номера тактовых сигналов между этими версиями разошлись (например,
+ * GCC_SDCC1_APPS_CLK: 137 против 122), поэтому драйверы включали и
+ * настраивали чужие сигналы — отсюда и отказы шины, и молчащая eMMC.
+ *
+ * Без BAM драйвер i2c_qup вечно возвращал -EPROBE_DEFER ("tx channel
+ * not available"), шины 78b6000/78b7000/78b8000 не поднимались, и
+ * тачскрин на 78b7000 не появлялся вовсе.
+ */
+&blsp1_dma {
+	status = "okay";
+};
+
+&blsp2_dma {
+	status = "okay";
+};
+

@@ -1,0 +1,14 @@
+[Unit]
+Description=Reinit touchscreen after boot (SM-T385)
+# Панель FTS8CD56 иногда просыпается «глухой» (probe проходит, события
+# не идут; в dmesg сыпется error code 0x0dec00d0ba). Полная перепривязка
+# драйвера гарантированно реинициализирует её — делаем это один раз
+# после загрузки.
+After=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'sleep 10; echo 3-0049 > /sys/bus/i2c/drivers/stmfts/unbind 2>/dev/null; sleep 1; echo 3-0049 > /sys/bus/i2c/drivers/stmfts/bind'
+
+[Install]
+WantedBy=multi-user.target

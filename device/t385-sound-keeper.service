@@ -1,0 +1,21 @@
+[Unit]
+Description=Keep audio path powered (SM-T385)
+# Тракт RX3 «глохнет» при пересборках питания (лотерея на каждом
+# старте потока). Бесконечная тишина держит синк в RUNNING — тракт
+# никогда не выключается, звук стабилен.
+After=pulseaudio.service
+Wants=pulseaudio.service
+
+[Service]
+ExecStartPre=/bin/sh -c 'until pactl info >/dev/null 2>&1; do sleep 2; done'
+# После появления нашей карты пере-объявить default sink: phosh
+# привязывает ползунок громкости к синку, существовавшему на его
+# старте (авто-заглушке), и без пинка не перепривязывается —
+# ползунок замирает. Проверено вживую 26.08.2026.
+ExecStartPost=/bin/sh -c 'for i in $(seq 1 60); do pactl list sinks short 2>/dev/null | grep -q HiFi__Speaker__sink && { sleep 2; pactl set-default-sink alsa_output.platform-c051000.sound-card.HiFi__Speaker__sink; exit 0; }; sleep 2; done'
+ExecStart=/usr/bin/paplay --raw --rate=44100 --channels=1 --format=s16le /dev/zero
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target

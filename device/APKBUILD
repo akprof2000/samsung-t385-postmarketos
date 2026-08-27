@@ -1,0 +1,179 @@
+# Reference: <https://postmarketos.org/devicepkg>
+# Пакет устройства — Samsung Galaxy Tab A 8.0 (2017) LTE (SM-T385, gta2slte)
+#
+# Построен по образцу device-qcom-msm89x7 из pmaports, а не по донорскому
+# пакету T380: в pmaports уже есть вся инфраструктура msm89x7
+# (soc-qcom-msm89x7, linux-postmarketos-qcom-msm89x7, firmware-qcom-msm89x7),
+# и опираться на неё правильнее, чем тащить самосборное ядро.
+#
+# Проприетарные блобы Wi-Fi сняты с живого SM-T385:
+#   /system/vendor/firmware/wlan/prima/WCNSS_*
+# Калибровка WCNSS_qcom_wlan_nv.bin у каждого экземпляра своя — снимать
+# нужно со своего планшета, скриптом tools/Pull-Firmware.ps1.
+# Распространять эти файлы нельзя, в репозиторий идёт только рецепт.
+
+pkgname=device-samsung-gta2slte
+pkgdesc="Samsung Galaxy Tab A 8.0 (2017) LTE"
+pkgver=0.1
+pkgrel=19
+url="https://postmarketos.org"
+license="MIT"
+arch="aarch64"
+options="!check !archcheck"
+depends="
+	firmware-qcom-adreno-a300
+	firmware-qcom-msm89x7
+	linux-postmarketos-qcom-msm89x7
+	lk2nd-msm8952
+	mkbootimg
+	msm-firmware-loader
+	postmarketos-base
+	soc-qcom-msm89x7
+	soc-qcom-msm89x7-ucm
+"
+# soc-qcom-msm89x7-ucm нужен потому, что наш HiFi.conf ссылается на
+# готовые последовательности codecs/msm8953-wcd/* из этого пакета.
+# (Комментарий обязан быть СНАРУЖИ depends= — внутри кавычек '#'
+#  не комментарий, а часть строки, и apk примет его за имя пакета.)
+makedepends="devicepkg-dev"
+
+subpackages="
+	$pkgname-nonfree-firmware:nonfree_firmware
+"
+
+source="
+	deviceinfo
+	modules-initfs
+	99-unmanaged-usb0.conf
+	WCNSS_qcom_wlan_nv.bin
+	WCNSS_cfg.dat
+	WCNSS_wlan_dictionary.dat
+	WCNSS_qcom_cfg.ini
+	ucm-card.conf
+	ucm-HiFi.conf
+	pulse-nosuspend.pa
+	pulse-rate.conf
+	t385-audio-wake
+	t385-audio-wake.service
+	t385-sound-keeper.service
+	t385-volblip.py
+	t385-volblip.service
+	t385-modem-dpm
+	t385-modem-dpm.service
+	t385-touch-kick.service
+	10-t385-lid.conf
+	t385-lid-screen.py
+	t385-lid-screen.service
+"
+
+build() {
+	devicepkg_build $startdir $pkgname
+}
+
+package() {
+	devicepkg_package $startdir $pkgname
+
+	# usb0 отдаём под отладочный SSH — NetworkManager его не трогает
+	install -Dm644 "$srcdir"/99-unmanaged-usb0.conf \
+		"$pkgdir"/etc/NetworkManager/conf.d/99-unmanaged-usb0.conf
+
+	# ALSA UCM. Без него PipeWire карту видит, но переключать наушники
+	# и микрофоны не умеет. ALSA ищет конфиг по имени карты из &sound,
+	# то есть по "samsung-gta2slte".
+	install -Dm644 "$srcdir"/ucm-card.conf \
+		"$pkgdir"/usr/share/alsa/ucm2/conf.d/samsung-gta2slte/samsung-gta2slte.conf
+	# Имя драйвера звуковой карты ядро обрезает до 15 символов
+	# ("samsung-gta2slt" без последней буквы), а ALSA ищет профиль
+	# именно по нему. Без копии под этим именем UCM не находится,
+	# и pulseaudio откатывается на stereo-fallback без гарнитуры.
+	install -Dm644 "$srcdir"/ucm-card.conf \
+		"$pkgdir"/usr/share/alsa/ucm2/conf.d/samsung-gta2slt/samsung-gta2slt.conf
+	install -Dm644 "$srcdir"/ucm-HiFi.conf \
+		"$pkgdir"/usr/share/alsa/ucm2/Samsung/gta2slte/HiFi.conf
+	install -Dm644 "$srcdir"/pulse-nosuspend.pa \
+		"$pkgdir"/etc/pulse/default.pa.d/t385-no-suspend.pa
+	install -Dm644 "$srcdir"/pulse-rate.conf \
+		"$pkgdir"/etc/pulse/daemon.conf.d/t385-rate.conf
+	install -Dm755 "$srcdir"/t385-audio-wake \
+		"$pkgdir"/usr/sbin/t385-audio-wake
+	install -Dm644 "$srcdir"/t385-audio-wake.service \
+		"$pkgdir"/usr/lib/systemd/system/t385-audio-wake.service
+	mkdir -p "$pkgdir"/usr/lib/systemd/system/multi-user.target.wants
+	ln -s ../t385-audio-wake.service \
+		"$pkgdir"/usr/lib/systemd/system/multi-user.target.wants/t385-audio-wake.service
+	install -Dm644 "$srcdir"/t385-sound-keeper.service \
+		"$pkgdir"/usr/lib/systemd/user/t385-sound-keeper.service
+	mkdir -p "$pkgdir"/usr/lib/systemd/user/default.target.wants
+	ln -s ../t385-sound-keeper.service \
+		"$pkgdir"/usr/lib/systemd/user/default.target.wants/t385-sound-keeper.service
+	install -Dm644 "$srcdir"/t385-volblip.py \
+		"$pkgdir"/usr/sbin/t385-volblip.py
+	install -Dm644 "$srcdir"/t385-volblip.service \
+		"$pkgdir"/usr/lib/systemd/system/t385-volblip.service
+	ln -s ../t385-volblip.service \
+		"$pkgdir"/usr/lib/systemd/system/multi-user.target.wants/t385-volblip.service
+	install -Dm644 "$srcdir"/10-t385-lid.conf \
+		"$pkgdir"/usr/lib/systemd/logind.conf.d/10-t385-lid.conf
+	install -Dm644 "$srcdir"/t385-lid-screen.py \
+		"$pkgdir"/usr/sbin/t385-lid-screen.py
+	install -Dm644 "$srcdir"/t385-lid-screen.service \
+		"$pkgdir"/usr/lib/systemd/system/t385-lid-screen.service
+	ln -s ../t385-lid-screen.service \
+		"$pkgdir"/usr/lib/systemd/system/multi-user.target.wants/t385-lid-screen.service
+	install -Dm644 "$srcdir"/t385-touch-kick.service \
+		"$pkgdir"/usr/lib/systemd/system/t385-touch-kick.service
+	ln -s ../t385-touch-kick.service \
+		"$pkgdir"/usr/lib/systemd/system/multi-user.target.wants/t385-touch-kick.service
+	install -Dm755 "$srcdir"/t385-modem-dpm \
+		"$pkgdir"/usr/sbin/t385-modem-dpm
+	install -Dm644 "$srcdir"/t385-modem-dpm.service \
+		"$pkgdir"/usr/lib/systemd/system/t385-modem-dpm.service
+	ln -s ../t385-modem-dpm.service \
+		"$pkgdir"/usr/lib/systemd/system/multi-user.target.wants/t385-modem-dpm.service
+	# hkdm монопольно захватывал устройства ввода — кнопки
+	# громкости не доходили до оболочки; маскируем
+	mkdir -p "$pkgdir"/etc/systemd/system
+	ln -s /dev/null "$pkgdir"/etc/systemd/system/hkdm.service
+}
+
+nonfree_firmware() {
+	pkgdesc="Wi-Fi firmware and per-device calibration for WCN3660B"
+	depends="wcnss-wlan"
+	mkdir "$subpkgdir"
+
+	# Без калибровки WCN3660B не поднимется: NV-данные привязаны
+	# к конкретному экземпляру планшета.
+	install -Dm644 "$srcdir"/WCNSS_qcom_wlan_nv.bin \
+		"$subpkgdir"/lib/firmware/postmarketos/wlan/prima/WCNSS_qcom_wlan_nv.bin
+	install -Dm644 "$srcdir"/WCNSS_cfg.dat \
+		"$subpkgdir"/lib/firmware/postmarketos/wlan/prima/WCNSS_cfg.dat
+	install -Dm644 "$srcdir"/WCNSS_wlan_dictionary.dat \
+		"$subpkgdir"/lib/firmware/postmarketos/wlan/prima/WCNSS_wlan_dictionary.dat
+	install -Dm644 "$srcdir"/WCNSS_qcom_cfg.ini \
+		"$subpkgdir"/lib/firmware/postmarketos/wlan/prima/WCNSS_qcom_cfg.ini
+}
+
+sha512sums="
+e0813da073a89da5ed6e0da073b8fb55f44132b66a43a6d0b7e734f33c343ef6712301d413916b374029fc146d0f5b0b2acc43215f4c3aee3a37a66afa69efc8  deviceinfo
+e93c9204b5bf6caac83915d981e8b4c1d4097c47b8798fe1371e6efe447e2be7e689f81a25c37ea503d0d84aff2320fe38bff3522a246b0f1b54c3b3633e0fcf  modules-initfs
+c0761451823623cbc4f30365709d58160eddbdf86ee3795d3fd7451112a45b237b83981bbd1b93c6c243996b86bce5334d34a57141d8ed047101128a2d40737d  99-unmanaged-usb0.conf
+691a3027164f4933e2b6cb60f3b676d05a2b0595eaae6395a841061ea672635089d3d0f1e30beea36472bbfc66152fdee0c858442c5b1853cff4baf54ae18f5f  WCNSS_qcom_wlan_nv.bin
+fb92214f928143228c0683934342ceff11f19bec0581684e98e155262bed03f51c21a21881ec03316f917c127b607a2943efea4847b908f1c02864a1e507fb50  WCNSS_cfg.dat
+0fed5c6d3ca97e28d17a057e4286fe065894efe2e9e31414c44efc552f87024656cdc9ca60fd6cb3fd8e67902d1a2804c66a32b80953c5565bb5962aa5424e07  WCNSS_wlan_dictionary.dat
+719316d41c7cd04e961930800113a72ab5865a771f5b7c2e56af94bb47da6672a29fa3d02a2324aca1e2c79c791b0a951abfb33f7fa164de2959c572bab04144  WCNSS_qcom_cfg.ini
+5f6908d3aa901a5b66f1e477727f57ad3c2fb4321b15846f8d4638c8309a7d9e7ba4460dca4573889e32fecbced53d4139a85c854589de1d2ccf946029504c5e  ucm-card.conf
+50c6082ce023ab504a266d9855508ef91cbfe870a8f497146968919dab17e5aa3a6f372ee45ad882564d5b1d99fcaeb931c9a32ec44608663261c15d3f960b1b  ucm-HiFi.conf
+48c7268a5a75e402e79468bb3ad888a26e43d07fbdd18d29835139116912dd825c6a93870107b1b83589a6c0238a5ee1653d28c105c60d138421b93b50af7c5e  pulse-nosuspend.pa
+83a9e9c4bf684222c18946b2527eaf4e209d60fe6a7586b5c654d7442904a72d255c53588f1a1990eec7c685129381a754a20c9629eccda65ba5d7ba54369b69  pulse-rate.conf
+ec99a81a3b54469e616b011ce964c7ab06117242764d121f956b70696b039757294db3a78578267bb09c79e36e599c483c0dc1b9b33e48b12e397e7583000553  t385-audio-wake
+2e583aac9c747b4d6a02ba348cfaec9f2138b04acff8579667ecd81724f6973eb91f5f79f8df9fa375b5e56a9b615bfaaefd8218385703390dce09faf4d5f039  t385-audio-wake.service
+e74a0598c4eef8e1fd3453df664f389d75154b983a1d06fafad3d98c3afea63f1e17b3fd2faafe71fde5a62cf9b9879be7f11617ac8ef91b4cd4abd3e65644a9  t385-sound-keeper.service
+f7d3e6af2b37d77220155dc884aa834555ab5ccaddda7b342ac6516acefa38cb479d8efc245c6a9eff15565ae1cac63de214aba0b0038934b5a96dadf0fb7a72  t385-volblip.py
+93dbfc2f6ce35388122d1b0ddd59008dfc10a2bd774113657c55dae80bbc3bcc7e8b2d01eca8f10e90d13fa9d08d01eea2a58a2b67cbedd66a514369cffd596a  t385-volblip.service
+5575425998c562d50fd95549184b1c2dbcd4059419a3a611c7ee3e674e98bff1e4507a791f3b5c4bb962fcc3a901fe015b9202d7f3b9553ad12d23f3718fcaad  t385-modem-dpm
+b120df387ef7230eade725e53a423a23193358defe61ba7cb62a2fc558b3d1947da938bb3d56952b559135fd3731ca67f53e4c0e7b9f70089868e57d20ae00c4  t385-modem-dpm.service
+9721225afe66cdfbc6c11068fee1909ac19df75ee64dc6bfce3d42c0a5390437462b8217192c8015fe7053d4b987de8f456225c06372dd029f7ee047999691be  t385-touch-kick.service
+f35185b9a3f6b6b4a55f2eb91363a284dcb74bec6e9736d87b37ee1c3ee5f27fd05fe8419db31468fdb553ecfe89e247a009224398fb6cca5805bf6d39a77e37  10-t385-lid.conf
+40ed7638b793eb1a33a3da735d736e90d22005db110cdb972e7ec7c29ef224e98f39182f69eeedc95636c4344bca509f2eb0e72193203c2caa4726c799239e60  t385-lid-screen.py
+4358ee8184d6ccb121ca0bb2f58bd32062bd76e2cb935c14e29315e405b47c82c5436d7de52386b6a3bca4e0a016d3037a838f482ddd5a7bd6745892c55460e2  t385-lid-screen.service
+"

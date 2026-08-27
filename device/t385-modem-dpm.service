@@ -1,0 +1,11 @@
+[Unit]
+Description=Open modem data ports via QMI DPM (SM-T385)
+After=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/t385-modem-dpm
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

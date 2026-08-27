@@ -1,0 +1,140 @@
+--- a/drivers/input/touchscreen/stmfts.c	2026-07-19 20:04:57.000000000 +0300
++++ b/drivers/input/touchscreen/stmfts.c	2026-08-23 20:24:47.830639217 +0300
+@@ -520,6 +520,67 @@
+ };
+ ATTRIBUTE_GROUPS(stmfts_sysfs);
+ 
++/*
++ * Запуск панели Samsung FTS8CD56 (SM-T385, SM-T380).
++ *
++ * Панель не понимает штатной последовательности этого драйвера:
++ * на однобайтовую команду сброса 0xA0 она отвечает событием ошибки
++ * 0x0F, а выход прерывания у неё по умолчанию выключен, поэтому
++ * ожидание подтверждения по прерыванию не заканчивается никогда —
++ * probe падает с -110 (проверено на живом устройстве).
++ *
++ * Стоковый драйвер Samsung (drivers/input/touchscreen/stm/fts8 в ядре
++ * для msm8917) делает иначе:
++ *   сброс          запись B6 00 28 80  (регистр 0x0028)
++ *   готовность     опрос события 0x85 до кода 0x10, без прерывания
++ *   очистка        команда 0xA1
++ *   калибровка     команда 0xA2
++ *   прерывание     запись B6 00 2C 48  (регистр 0x002C) — в самом конце,
++ *                  и заново после каждого пробуждения (SLEEP_OUT)
++ *
++ * Формат самих событий касания совпадает с тем, что драйвер уже
++ * разбирает (0x03 нажатие, 0x04 отпускание, 0x05 движение), поэтому
++ * правится только запуск и пробуждение.
++ */
++#define STMFTS_SAMSUNG_RESET		0x28
++#define STMFTS_SAMSUNG_INT_CTRL		0x2c
++#define STMFTS_SAMSUNG_REG_WRITE	0xb6
++#define STMFTS_SAMSUNG_RESET_VAL	0x80
++#define STMFTS_SAMSUNG_INT_ENABLE	0x48
++#define STMFTS_SAMSUNG_EV_READY		0x10
++
++/* Запись во внутренний регистр панели: B6 <адрес_ст> <адрес_мл> <значение> */
++static int stmfts_samsung_write_reg(struct stmfts_data *sdata, u8 reg, u8 val)
++{
++	u8 buf[3] = { 0x00, reg, val };
++
++	return i2c_smbus_write_i2c_block_data(sdata->client,
++					      STMFTS_SAMSUNG_REG_WRITE,
++					      sizeof(buf), buf);
++}
++
++/*
++ * Ждём готовности опросом очереди событий, а не по прерыванию:
++ * у панели оно ещё выключено. Стоковый драйвер ждёт так же.
++ */
++static int stmfts_samsung_wait_ready(struct stmfts_data *sdata)
++{
++	u8 ev[STMFTS_EVENT_SIZE];
++	int err, i;
++
++	for (i = 0; i < 100; i++) {
++		err = i2c_smbus_read_i2c_block_data(sdata->client,
++						    STMFTS_READ_ONE_EVENT,
++						    sizeof(ev), ev);
++		if (err == sizeof(ev) && ev[0] == STMFTS_SAMSUNG_EV_READY)
++			return 0;
++		msleep(20);
++	}
++
++	dev_err(&sdata->client->dev, "controller did not report ready\n");
++	return -ETIMEDOUT;
++}
++
+ static int stmfts_power_on(struct stmfts_data *sdata)
+ {
+ 	int err;
+@@ -553,27 +614,37 @@
+ 
+ 	msleep(50);
+ 
+-	err = stmfts_command(sdata, STMFTS_SYSTEM_RESET);
++	/* Сброс по-самсунговски и ожидание готовности опросом. */
++	err = stmfts_samsung_write_reg(sdata, STMFTS_SAMSUNG_RESET,
++				       STMFTS_SAMSUNG_RESET_VAL);
+ 	if (err)
+ 		return err;
+ 
+-	err = stmfts_command(sdata, STMFTS_SLEEP_OUT);
++	msleep(20);
++
++	err = stmfts_samsung_wait_ready(sdata);
+ 	if (err)
+ 		return err;
+ 
+-	/* optional tuning */
+-	err = stmfts_command(sdata, STMFTS_MS_CX_TUNING);
++	/* Очистка буфера событий и калибровка — без ожидания прерывания. */
++	err = i2c_smbus_write_byte(sdata->client, STMFTS_CLEAR_EVENT_STACK);
+ 	if (err)
+-		dev_warn(&sdata->client->dev,
+-			 "failed to perform mutual auto tune: %d\n", err);
++		dev_warn(&sdata->client->dev, "failed to clear event stack: %d\n", err);
++
++	msleep(50);
+ 
+-	/* optional tuning */
+-	err = stmfts_command(sdata, STMFTS_SS_CX_TUNING);
++	err = i2c_smbus_write_byte(sdata->client, STMFTS_FULL_FORCE_CALIBRATION);
+ 	if (err)
+-		dev_warn(&sdata->client->dev,
+-			 "failed to perform self auto tune: %d\n", err);
++		dev_warn(&sdata->client->dev, "failed to start calibration: %d\n", err);
++
++	msleep(1000);
+ 
+-	err = stmfts_command(sdata, STMFTS_FULL_FORCE_CALIBRATION);
++	/*
++	 * Включаем выход прерывания последним, как и сток. До этой записи
++	 * панель линию не трогает вовсе.
++	 */
++	err = stmfts_samsung_write_reg(sdata, STMFTS_SAMSUNG_INT_CTRL,
++				       STMFTS_SAMSUNG_INT_ENABLE);
+ 	if (err)
+ 		return err;
+ 
+@@ -754,6 +825,20 @@
+ 	if (ret)
+ 		dev_err(dev, "failed to resume device: %d\n", ret);
+ 
++	/*
++	 * Панель FTS8CD56 после SLEEP_OUT забывает, что выход прерывания
++	 * был включён: на живом устройстве после цикла сна/пробуждения
++	 * приходило ровно одно прерывание, после повторного включения —
++	 * десятки. Сток включает выход после каждого пробуждения.
++	 */
++	if (!ret) {
++		msleep(50);
++		ret = stmfts_samsung_write_reg(sdata, STMFTS_SAMSUNG_INT_CTRL,
++					       STMFTS_SAMSUNG_INT_ENABLE);
++		if (ret)
++			dev_err(dev, "failed to re-enable irq output: %d\n", ret);
++	}
++
+ 	return ret;
+ }
+ 

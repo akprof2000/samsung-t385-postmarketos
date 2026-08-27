@@ -1,0 +1,91 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/*
+ * WCNSS (Pronto) + Iris для Samsung gta2slte / SM-T385 (msm8917).
+ * Идентична версии T380: чип WCN3660B и распиновка GPIO 76-80 совпадают.
+ */
+
+&tlmm {
+	wcnss_default: wcnss-default-state {
+		wlan2-pins {
+			pins = "gpio76";
+			function = "wcss_wlan2";
+			drive-strength = <6>;
+			bias-pull-up;
+		};
+		wlan1-pins {
+			pins = "gpio77";
+			function = "wcss_wlan1";
+			drive-strength = <6>;
+			bias-pull-up;
+		};
+		wlan0-pins {
+			pins = "gpio78";
+			function = "wcss_wlan0";
+			drive-strength = <6>;
+			bias-pull-up;
+		};
+		wlan-pins {
+			pins = "gpio79", "gpio80";
+			function = "wcss_wlan";
+			drive-strength = <6>;
+			bias-pull-up;
+		};
+	};
+};
+
+&apcs {
+	#mbox-cells = <1>;
+};
+
+&wcnss {
+	status = "okay";
+	memory-region = <&wcnss_fw_region>;
+
+	clocks = <&rpmcc RPM_SMD_SNOC_A_CLK>,
+		 <&rpmcc RPM_SMD_BB_CLK1>;
+	clock-names = "snoc", "xo";
+
+	power-domains = <&rpmpd MSM8917_VDDCX>,
+			<&rpmpd MSM8917_VDDMX>;
+	power-domain-names = "cx", "mx";
+
+	vddcx-supply = <&pm8937_l23>;
+	vddmx-supply = <&pm8937_l3>;
+	vddpx-supply = <&pm8937_l5>;
+
+	pinctrl-names = "default";
+	pinctrl-0 = <&wcnss_default>;
+
+	smd-edge {
+		interrupts = <GIC_SPI 142 IRQ_TYPE_EDGE_RISING>;
+		mboxes = <&apcs 17>;
+		qcom,smd-edge = <6>;
+		qcom,ipc = <&apcs 8 17>;
+		label = "pronto";
+
+		wcnss_ctrl: wcnss {
+			compatible = "qcom,wcnss";
+			qcom,smd-channels = "WCNSS_CTRL";
+			qcom,channel-intr = <1>;
+
+			bluetooth {
+				compatible = "qcom,wcnss-bt";
+			};
+		};
+
+		wlan {
+			compatible = "qcom,wcn36xx";
+		};
+	};
+
+	iris {
+		compatible = "qcom,wcn3660b";
+		qcom,no-dual-band;
+		clocks = <&rpmcc RPM_SMD_RF_CLK2>;
+		clock-names = "xo";
+		vddxo-supply = <&pm8937_l7>;
+		vddrfa-supply = <&pm8937_l19>;
+		vddpa-supply = <&pm8937_l9>;
+		vdddig-supply = <&pm8937_l5>;
+	};
+};

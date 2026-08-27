@@ -1,0 +1,34 @@
+#!/bin/sh
+# SM-T385: тракт динамиков (RX3) после загрузки может встать «глухим»
+# (лотерея при первом включении). Проверенное лечение: при свободном
+# hw:0,0 прогнать тракт Earpiece (RX1), затем свежий прогон RX3 —
+# и только потом отдавать карту звуковому серверу. Держатель
+# (t385-sound-keeper, пользовательская служба) далее не даёт тракту
+# выключаться, замораживая рабочее состояние.
+n=0
+until [ -e /dev/snd/pcmC0D0p ]; do sleep 1; n=$((n+1)); [ "$n" -gt 90 ] && exit 1; done
+A() { amixer -c 0 cset "name=$1" "$2" >/dev/null 2>&1; }
+ok=1
+for try in 1 2 3 4 5 6 7 8; do
+    pkill -9 pulseaudio 2>/dev/null
+    alsaucm -c samsung-gta2slt set _verb HiFi set _enadev Earpiece >/dev/null 2>&1
+    A "PRI_MI2S_RX Audio Mixer MultiMedia1" 1
+    A "RX1 Digital Volume" 0
+    if ! timeout 3 speaker-test -D hw:0,0 -c 1 -t sine -f 1300 -l 1 >/dev/null 2>&1; then
+        sleep 2
+        continue
+    fi
+    A "RX1 Digital Volume" 0
+    A "EAR_S" 0
+    A "RX1 MIX1 INP1" ZERO
+    A "RX3 MIX1 INP1" RX1
+    A "RX3 Digital Volume" 0
+    A "SPK DAC Switch" 1
+    A "LINEOUT DAC Switch" 1
+    timeout 2 speaker-test -D hw:0,0 -c 2 -t sine -f 700 -l 1 >/dev/null 2>&1
+    A "SPK DAC Switch" 0
+    A "LINEOUT DAC Switch" 0
+    ok=0
+    break
+done
+exit $ok

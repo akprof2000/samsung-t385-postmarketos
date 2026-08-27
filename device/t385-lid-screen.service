@@ -1,0 +1,11 @@
+[Unit]
+Description=Blank screen on cover close (SM-T385)
+After=multi-user.target
+
+[Service]
+ExecStart=/usr/bin/python3 /usr/sbin/t385-lid-screen.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
