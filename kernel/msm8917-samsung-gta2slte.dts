@@ -311,6 +311,38 @@
 		enable-active-high;
 	};
 
+	/*
+	 * Питание смещения микрофонов. В стоковом дереве это отдельные
+	 * выводы: qcom,mainmic-bias-gpio = <&tlmm 68>, submic — <&tlmm 99>.
+	 * Без них аналоговые микрофоны молчат: кодек честно включает AMIC1,
+	 * ADC1 и своё внутреннее смещение, но на сам микрофон питание не
+	 * приходит, и в записи только шум. Проверено замером: без смещения
+	 * уровень сигнала ~7, с ним ~150.
+	 *
+	 * Держим включёнными постоянно: расход — доли миллиампера, а
+	 * привязать их к включению тракта в mainline-драйвере кодека
+	 * (msm8916-wcd-analog) нечем — внешнего смещения он не знает.
+	 */
+	reg_mic_bias_main: regulator-mic-bias-main {
+		compatible = "regulator-fixed";
+		regulator-name = "mic_bias_main";
+		regulator-min-microvolt = <2800000>;
+		regulator-max-microvolt = <2800000>;
+		gpio = <&tlmm 68 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+		regulator-always-on;
+	};
+
+	reg_mic_bias_sub: regulator-mic-bias-sub {
+		compatible = "regulator-fixed";
+		regulator-name = "mic_bias_sub";
+		regulator-min-microvolt = <2800000>;
+		regulator-max-microvolt = <2800000>;
+		gpio = <&tlmm 99 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+		regulator-always-on;
+	};
+
 	reg_vbus_fixed: regulator-vbus-fixed {
 		compatible = "regulator-fixed";
 		regulator-name = "vbus_fixed";

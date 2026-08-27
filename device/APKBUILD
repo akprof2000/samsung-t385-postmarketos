@@ -15,7 +15,7 @@
 pkgname=device-samsung-gta2slte
 pkgdesc="Samsung Galaxy Tab A 8.0 (2017) LTE"
 pkgver=0.1
-pkgrel=25
+pkgrel=28
 url="https://postmarketos.org"
 license="MIT"
 arch="aarch64"
@@ -51,6 +51,7 @@ source="
 	WCNSS_qcom_cfg.ini
 	ucm-card.conf
 	ucm-HiFi.conf
+	ucm-VoiceCall.conf
 	pulse-nosuspend.pa
 	pulse-rate.conf
 	t385-audio-wake
@@ -65,6 +66,7 @@ source="
 	t385-callaudio.py
 	t385-callaudio.service
 	feedbackd-gta2slte.json
+	73-t385-torch.rules
 	10-t385-lid.conf
 	t385-lid-screen.py
 	t385-lid-screen.service
@@ -94,6 +96,8 @@ package() {
 		"$pkgdir"/usr/share/alsa/ucm2/conf.d/samsung-gta2slt/samsung-gta2slt.conf
 	install -Dm644 "$srcdir"/ucm-HiFi.conf \
 		"$pkgdir"/usr/share/alsa/ucm2/Samsung/gta2slte/HiFi.conf
+	install -Dm644 "$srcdir"/ucm-VoiceCall.conf \
+		"$pkgdir"/usr/share/alsa/ucm2/Samsung/gta2slte/VoiceCall.conf
 	install -Dm644 "$srcdir"/pulse-nosuspend.pa \
 		"$pkgdir"/etc/pulse/default.pa.d/t385-no-suspend.pa
 	install -Dm644 "$srcdir"/pulse-rate.conf \
@@ -135,6 +139,10 @@ package() {
 	# ею на пропущенные уведомления; наша схема — без светодиода.
 	install -Dm644 "$srcdir"/feedbackd-gta2slte.json \
 		"$pkgdir"/usr/share/feedbackd/themes/samsung,gta2slte.json
+	# Вспышка остаётся под кнопкой фонарика и не служит
+	# мигалкой уведомлений — см. комментарий в правиле.
+	install -Dm644 "$srcdir"/73-t385-torch.rules \
+		"$pkgdir"/usr/lib/udev/rules.d/73-t385-torch.rules
 	install -Dm644 "$srcdir"/t385-callaudio.service \
 		"$pkgdir"/usr/lib/systemd/system/t385-callaudio.service
 	ln -s ../t385-callaudio.service \
@@ -181,8 +189,9 @@ c0761451823623cbc4f30365709d58160eddbdf86ee3795d3fd7451112a45b237b83981bbd1b93c6
 fb92214f928143228c0683934342ceff11f19bec0581684e98e155262bed03f51c21a21881ec03316f917c127b607a2943efea4847b908f1c02864a1e507fb50  WCNSS_cfg.dat
 0fed5c6d3ca97e28d17a057e4286fe065894efe2e9e31414c44efc552f87024656cdc9ca60fd6cb3fd8e67902d1a2804c66a32b80953c5565bb5962aa5424e07  WCNSS_wlan_dictionary.dat
 719316d41c7cd04e961930800113a72ab5865a771f5b7c2e56af94bb47da6672a29fa3d02a2324aca1e2c79c791b0a951abfb33f7fa164de2959c572bab04144  WCNSS_qcom_cfg.ini
-5f6908d3aa901a5b66f1e477727f57ad3c2fb4321b15846f8d4638c8309a7d9e7ba4460dca4573889e32fecbced53d4139a85c854589de1d2ccf946029504c5e  ucm-card.conf
+aa478da60b8191dc01d1b82a4438d203f694140cecfd4d66976a1c0ca118700adb642ef5daf6c55809d75e7c2ed5acdc82493e5ee7f7bd6ddc00b0f51aa6cef8  ucm-card.conf
 be503fb3e99fdc55cc8dc8d8450dacb8bcd0525e43f9467048d6c8fcaad610ae1454802714484cb47cfa259da4888ec7bb64f101181b0020f8aef24fe91ac333  ucm-HiFi.conf
+29a26a00b339ac6c67d047507d78b18479807fbf82e355418a0aa4d2f7fa019e1d46c0078d3b8cb612c78653a7c01085041e6ba40afc35b581063789b91c0f20  ucm-VoiceCall.conf
 48c7268a5a75e402e79468bb3ad888a26e43d07fbdd18d29835139116912dd825c6a93870107b1b83589a6c0238a5ee1653d28c105c60d138421b93b50af7c5e  pulse-nosuspend.pa
 83a9e9c4bf684222c18946b2527eaf4e209d60fe6a7586b5c654d7442904a72d255c53588f1a1990eec7c685129381a754a20c9629eccda65ba5d7ba54369b69  pulse-rate.conf
 ec99a81a3b54469e616b011ce964c7ab06117242764d121f956b70696b039757294db3a78578267bb09c79e36e599c483c0dc1b9b33e48b12e397e7583000553  t385-audio-wake
@@ -197,6 +206,7 @@ eecca80da32c3e844e6aed207a113d174a5b71b4977ef4ad7ef4676d086c92f19db0e4915cffec4e
 cc27afc7368213775e2c0fe7f08e135fea06907883c88b16990e5ad092b42f674d37acc42a18665dbb5aac7b2547e3ca5bf555922691206853c9944344866fde  t385-callaudio.py
 bca09f42dcdcb135fba6496b82a4643fdf976be01dc75edd50fddc4c0f28f6a27ad848176b03d782324809a6ed14b4204e4c8daa118933de323e215502506d4e  t385-callaudio.service
 ace268d7ac48840e0dbd4ef96be4ef521a2abad4b17b07fb75b640eb168af1470a449ec01f8a77f290df47fb7e7531cfcc92d11d52896a4a8f81b21491810d66  feedbackd-gta2slte.json
+5a36dfd91baa9a9da70150e802d47278005343ea00b73bd6d985b834293366c544a6c0528a171e9748f491bbf4b7fbf24654fc936e0cc40aefb8a4c0a81044ee  73-t385-torch.rules
 3ff49cd94278153a777d8daa13a8c28bc6fca96ed12db8dd0860e72c54e9083389fdd486c3d5bc9d5766cc953481187f25573678dd31630ab5e445abc9e0244e  10-t385-lid.conf
 40ed7638b793eb1a33a3da735d736e90d22005db110cdb972e7ec7c29ef224e98f39182f69eeedc95636c4344bca509f2eb0e72193203c2caa4726c799239e60  t385-lid-screen.py
 4358ee8184d6ccb121ca0bb2f58bd32062bd76e2cb935c14e29315e405b47c82c5436d7de52386b6a3bca4e0a016d3037a838f482ddd5a7bd6745892c55460e2  t385-lid-screen.service
