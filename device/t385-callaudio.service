@@ -1,0 +1,16 @@
+[Unit]
+Description=Voice call audio path (SM-T385)
+# Держит голосовой поток VoiceMMode1 открытым, пока идёт разговор —
+# только по этому признаку звуковой сопроцессор поднимает разговорный
+# тракт между модемом и кодеком. Без службы соединение есть, а звука
+# нет в обе стороны.
+After=ModemManager.service
+Wants=ModemManager.service
+
+[Service]
+ExecStart=/usr/bin/python3 /usr/sbin/t385-callaudio.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

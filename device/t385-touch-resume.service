@@ -1,0 +1,14 @@
+[Unit]
+Description=Reinit touchscreen after resume (SM-T385)
+# Панель FTS8CD56 просыпается «глухой»: probe цел, прерывание включено,
+# но события не идут (в dmesg сыплется error code 0x0dec00d0ba). Ровно
+# то же бывает после загрузки — лечится полной перепривязкой драйвера.
+After=suspend.target
+StopWhenUnneeded=yes
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'echo 3-0049 > /sys/bus/i2c/drivers/stmfts/unbind 2>/dev/null; sleep 1; echo 3-0049 > /sys/bus/i2c/drivers/stmfts/bind'
+
+[Install]
+WantedBy=suspend.target

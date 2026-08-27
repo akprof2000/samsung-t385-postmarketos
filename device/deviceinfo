@@ -34,7 +34,7 @@ deviceinfo_screen_height="1280"
 # Ядро гасит «неиспользуемые» клоки и домены на старте, включая дисплейный
 # контроллер, который до прихода msm-drm (~18с) сканирует буфер загрузчика.
 # Без этих флагов plymouth рисует сплэш в мёртвый буфер — экран чёрный.
-deviceinfo_kernel_cmdline="clk_ignore_unused pd_ignore_unused quiet splash plymouth.ignore-serial-consoles plymouth.prefer-fbcon"
+deviceinfo_kernel_cmdline="clk_ignore_unused pd_ignore_unused quiet loglevel=0 vt.global_cursor_default=0 splash plymouth.ignore-serial-consoles plymouth.prefer-fbcon"
 
 # Bootloader related
 #

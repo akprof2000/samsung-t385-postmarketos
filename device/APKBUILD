@@ -15,7 +15,7 @@
 pkgname=device-samsung-gta2slte
 pkgdesc="Samsung Galaxy Tab A 8.0 (2017) LTE"
 pkgver=0.1
-pkgrel=19
+pkgrel=25
 url="https://postmarketos.org"
 license="MIT"
 arch="aarch64"
@@ -61,6 +61,10 @@ source="
 	t385-modem-dpm
 	t385-modem-dpm.service
 	t385-touch-kick.service
+	t385-touch-resume.service
+	t385-callaudio.py
+	t385-callaudio.service
+	feedbackd-gta2slte.json
 	10-t385-lid.conf
 	t385-lid-screen.py
 	t385-lid-screen.service
@@ -122,6 +126,22 @@ package() {
 		"$pkgdir"/usr/lib/systemd/system/multi-user.target.wants/t385-lid-screen.service
 	install -Dm644 "$srcdir"/t385-touch-kick.service \
 		"$pkgdir"/usr/lib/systemd/system/t385-touch-kick.service
+	install -Dm644 "$srcdir"/t385-touch-resume.service \
+		"$pkgdir"/usr/lib/systemd/system/t385-touch-resume.service
+	install -Dm755 "$srcdir"/t385-callaudio.py \
+		"$pkgdir"/usr/sbin/t385-callaudio.py
+	# У планшета нет индикаторного светодиода: единственный в
+	# системе — вспышка камеры. Стандартная схема feedbackd мигает
+	# ею на пропущенные уведомления; наша схема — без светодиода.
+	install -Dm644 "$srcdir"/feedbackd-gta2slte.json \
+		"$pkgdir"/usr/share/feedbackd/themes/samsung,gta2slte.json
+	install -Dm644 "$srcdir"/t385-callaudio.service \
+		"$pkgdir"/usr/lib/systemd/system/t385-callaudio.service
+	ln -s ../t385-callaudio.service \
+		"$pkgdir"/usr/lib/systemd/system/multi-user.target.wants/t385-callaudio.service
+	mkdir -p "$pkgdir"/usr/lib/systemd/system/suspend.target.wants
+	ln -s ../t385-touch-resume.service \
+		"$pkgdir"/usr/lib/systemd/system/suspend.target.wants/t385-touch-resume.service
 	ln -s ../t385-touch-kick.service \
 		"$pkgdir"/usr/lib/systemd/system/multi-user.target.wants/t385-touch-kick.service
 	install -Dm755 "$srcdir"/t385-modem-dpm \
@@ -154,7 +174,7 @@ nonfree_firmware() {
 }
 
 sha512sums="
-e0813da073a89da5ed6e0da073b8fb55f44132b66a43a6d0b7e734f33c343ef6712301d413916b374029fc146d0f5b0b2acc43215f4c3aee3a37a66afa69efc8  deviceinfo
+89401904af71d140451b1f6c514ef6628ac40fa64aca088367cea1aac1c2b5ab8be3f1c51ca4e9e48c07c32194bef63b26f11370af87ead6d3fdcacace3793cd  deviceinfo
 e93c9204b5bf6caac83915d981e8b4c1d4097c47b8798fe1371e6efe447e2be7e689f81a25c37ea503d0d84aff2320fe38bff3522a246b0f1b54c3b3633e0fcf  modules-initfs
 c0761451823623cbc4f30365709d58160eddbdf86ee3795d3fd7451112a45b237b83981bbd1b93c6c243996b86bce5334d34a57141d8ed047101128a2d40737d  99-unmanaged-usb0.conf
 691a3027164f4933e2b6cb60f3b676d05a2b0595eaae6395a841061ea672635089d3d0f1e30beea36472bbfc66152fdee0c858442c5b1853cff4baf54ae18f5f  WCNSS_qcom_wlan_nv.bin
@@ -162,7 +182,7 @@ fb92214f928143228c0683934342ceff11f19bec0581684e98e155262bed03f51c21a21881ec0331
 0fed5c6d3ca97e28d17a057e4286fe065894efe2e9e31414c44efc552f87024656cdc9ca60fd6cb3fd8e67902d1a2804c66a32b80953c5565bb5962aa5424e07  WCNSS_wlan_dictionary.dat
 719316d41c7cd04e961930800113a72ab5865a771f5b7c2e56af94bb47da6672a29fa3d02a2324aca1e2c79c791b0a951abfb33f7fa164de2959c572bab04144  WCNSS_qcom_cfg.ini
 5f6908d3aa901a5b66f1e477727f57ad3c2fb4321b15846f8d4638c8309a7d9e7ba4460dca4573889e32fecbced53d4139a85c854589de1d2ccf946029504c5e  ucm-card.conf
-50c6082ce023ab504a266d9855508ef91cbfe870a8f497146968919dab17e5aa3a6f372ee45ad882564d5b1d99fcaeb931c9a32ec44608663261c15d3f960b1b  ucm-HiFi.conf
+be503fb3e99fdc55cc8dc8d8450dacb8bcd0525e43f9467048d6c8fcaad610ae1454802714484cb47cfa259da4888ec7bb64f101181b0020f8aef24fe91ac333  ucm-HiFi.conf
 48c7268a5a75e402e79468bb3ad888a26e43d07fbdd18d29835139116912dd825c6a93870107b1b83589a6c0238a5ee1653d28c105c60d138421b93b50af7c5e  pulse-nosuspend.pa
 83a9e9c4bf684222c18946b2527eaf4e209d60fe6a7586b5c654d7442904a72d255c53588f1a1990eec7c685129381a754a20c9629eccda65ba5d7ba54369b69  pulse-rate.conf
 ec99a81a3b54469e616b011ce964c7ab06117242764d121f956b70696b039757294db3a78578267bb09c79e36e599c483c0dc1b9b33e48b12e397e7583000553  t385-audio-wake
@@ -172,8 +192,12 @@ f7d3e6af2b37d77220155dc884aa834555ab5ccaddda7b342ac6516acefa38cb479d8efc245c6a9e
 93dbfc2f6ce35388122d1b0ddd59008dfc10a2bd774113657c55dae80bbc3bcc7e8b2d01eca8f10e90d13fa9d08d01eea2a58a2b67cbedd66a514369cffd596a  t385-volblip.service
 5575425998c562d50fd95549184b1c2dbcd4059419a3a611c7ee3e674e98bff1e4507a791f3b5c4bb962fcc3a901fe015b9202d7f3b9553ad12d23f3718fcaad  t385-modem-dpm
 b120df387ef7230eade725e53a423a23193358defe61ba7cb62a2fc558b3d1947da938bb3d56952b559135fd3731ca67f53e4c0e7b9f70089868e57d20ae00c4  t385-modem-dpm.service
-9721225afe66cdfbc6c11068fee1909ac19df75ee64dc6bfce3d42c0a5390437462b8217192c8015fe7053d4b987de8f456225c06372dd029f7ee047999691be  t385-touch-kick.service
-f35185b9a3f6b6b4a55f2eb91363a284dcb74bec6e9736d87b37ee1c3ee5f27fd05fe8419db31468fdb553ecfe89e247a009224398fb6cca5805bf6d39a77e37  10-t385-lid.conf
+4772179d262be8477a1c814580148cbf669610e0b7de238c8220bb3c3d5ed4a3710879a2f95750c598b961827e381cdd7cd57c990e490cb9f3c9cb34d3052f5f  t385-touch-kick.service
+eecca80da32c3e844e6aed207a113d174a5b71b4977ef4ad7ef4676d086c92f19db0e4915cffec4e06d1998b3652f6560c5c81d4b7304e0c61c99f01d3e01bdc  t385-touch-resume.service
+cc27afc7368213775e2c0fe7f08e135fea06907883c88b16990e5ad092b42f674d37acc42a18665dbb5aac7b2547e3ca5bf555922691206853c9944344866fde  t385-callaudio.py
+bca09f42dcdcb135fba6496b82a4643fdf976be01dc75edd50fddc4c0f28f6a27ad848176b03d782324809a6ed14b4204e4c8daa118933de323e215502506d4e  t385-callaudio.service
+ace268d7ac48840e0dbd4ef96be4ef521a2abad4b17b07fb75b640eb168af1470a449ec01f8a77f290df47fb7e7531cfcc92d11d52896a4a8f81b21491810d66  feedbackd-gta2slte.json
+3ff49cd94278153a777d8daa13a8c28bc6fca96ed12db8dd0860e72c54e9083389fdd486c3d5bc9d5766cc953481187f25573678dd31630ab5e445abc9e0244e  10-t385-lid.conf
 40ed7638b793eb1a33a3da735d736e90d22005db110cdb972e7ec7c29ef224e98f39182f69eeedc95636c4344bca509f2eb0e72193203c2caa4726c799239e60  t385-lid-screen.py
 4358ee8184d6ccb121ca0bb2f58bd32062bd76e2cb935c14e29315e405b47c82c5436d7de52386b6a3bca4e0a016d3037a838f482ddd5a7bd6745892c55460e2  t385-lid-screen.service
 "

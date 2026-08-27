@@ -700,6 +700,13 @@
 };
 
 &tlmm {
+	sdc2_cd_default: sdc2-cd-default-state {
+		pins = "gpio67";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
+
 	gpio_keys_default: gpio-keys-default-state {
 		pins = "gpio46", "gpio127", "gpio128";
 		function = "gpio";
@@ -888,11 +895,23 @@
 
 &sdhc_2 {
 	/*
-	 * Слот SD-карты временно выключен: ядро молча умирало сразу
-	 * после "7864900.mmc: Got CD GPIO". Проверяем, он ли виновник.
-	 * Корень лежит на eMMC (sdhc_1), загрузке это не мешает.
+	 * Слот microSD. Питание и пин детекта карты (GPIO67) — как в
+	 * стоковом дереве; та же связка у msm8917-huawei-agassi.
+	 *
+	 * Слот долго стоял выключенным: на раннем этапе порта ядро молча
+	 * умирало сразу после "Got CD GPIO". Причина была не в слоте, а в
+	 * том, что DTB тогда собирался номерами тактовых сигналов от
+	 * чужой версии ядра (см. RAZBOR.md) — после исправления слот
+	 * работает.
 	 */
-	status = "disabled";
+	cd-gpios = <&tlmm 67 GPIO_ACTIVE_LOW>;
+	vmmc-supply = <&pm8937_l11>;
+	vqmmc-supply = <&pm8937_l12>;
+	pinctrl-0 = <&sdc2_default>, <&sdc2_cd_default>;
+	pinctrl-1 = <&sdc2_sleep>, <&sdc2_cd_default>;
+	pinctrl-names = "default", "sleep";
+
+	status = "okay";
 };
 
 /*
