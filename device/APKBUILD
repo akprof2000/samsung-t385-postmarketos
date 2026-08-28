@@ -15,7 +15,7 @@
 pkgname=device-samsung-gta2slte
 pkgdesc="Samsung Galaxy Tab A 8.0 (2017) LTE"
 pkgver=0.1
-pkgrel=28
+pkgrel=30
 url="https://postmarketos.org"
 license="MIT"
 arch="aarch64"
@@ -36,6 +36,9 @@ depends="
 # (Комментарий обязан быть СНАРУЖИ depends= — внутри кавычек '#'
 #  не комментарий, а часть строки, и apk примет его за имя пакета.)
 makedepends="devicepkg-dev"
+# Файл активации на шине принадлежит пакету callaudiod:
+# без этого apk откажется его заменять своим.
+replaces="callaudiod"
 
 subpackages="
 	$pkgname-nonfree-firmware:nonfree_firmware
@@ -63,8 +66,9 @@ source="
 	t385-modem-dpm.service
 	t385-touch-kick.service
 	t385-touch-resume.service
-	t385-callaudio.py
-	t385-callaudio.service
+	t385-callaudiod.py
+	callaudio-dbus.service
+	q6voiced-t385.conf
 	feedbackd-gta2slte.json
 	73-t385-torch.rules
 	10-t385-lid.conf
@@ -132,8 +136,15 @@ package() {
 		"$pkgdir"/usr/lib/systemd/system/t385-touch-kick.service
 	install -Dm644 "$srcdir"/t385-touch-resume.service \
 		"$pkgdir"/usr/lib/systemd/system/t385-touch-resume.service
-	install -Dm755 "$srcdir"/t385-callaudio.py \
-		"$pkgdir"/usr/sbin/t385-callaudio.py
+	# Управление звуком разговора: своя служба вместо callaudiod.
+	install -Dm755 "$srcdir"/t385-callaudiod.py \
+		"$pkgdir"/usr/sbin/t385-callaudiod.py
+	install -Dm644 "$srcdir"/callaudio-dbus.service \
+		"$pkgdir"/usr/share/dbus-1/services/org.mobian_project.CallAudio.service
+	# Разговорный тракт поднимает штатная q6voiced — ей надо
+	# указать верный номер голосового потока, иначе микрофон нем.
+	install -Dm644 "$srcdir"/q6voiced-t385.conf \
+		"$pkgdir"/usr/lib/systemd/system/q6voiced.service.d/10-t385-device.conf
 	# У планшета нет индикаторного светодиода: единственный в
 	# системе — вспышка камеры. Стандартная схема feedbackd мигает
 	# ею на пропущенные уведомления; наша схема — без светодиода.
@@ -143,10 +154,6 @@ package() {
 	# мигалкой уведомлений — см. комментарий в правиле.
 	install -Dm644 "$srcdir"/73-t385-torch.rules \
 		"$pkgdir"/usr/lib/udev/rules.d/73-t385-torch.rules
-	install -Dm644 "$srcdir"/t385-callaudio.service \
-		"$pkgdir"/usr/lib/systemd/system/t385-callaudio.service
-	ln -s ../t385-callaudio.service \
-		"$pkgdir"/usr/lib/systemd/system/multi-user.target.wants/t385-callaudio.service
 	mkdir -p "$pkgdir"/usr/lib/systemd/system/suspend.target.wants
 	ln -s ../t385-touch-resume.service \
 		"$pkgdir"/usr/lib/systemd/system/suspend.target.wants/t385-touch-resume.service
@@ -190,8 +197,8 @@ fb92214f928143228c0683934342ceff11f19bec0581684e98e155262bed03f51c21a21881ec0331
 0fed5c6d3ca97e28d17a057e4286fe065894efe2e9e31414c44efc552f87024656cdc9ca60fd6cb3fd8e67902d1a2804c66a32b80953c5565bb5962aa5424e07  WCNSS_wlan_dictionary.dat
 719316d41c7cd04e961930800113a72ab5865a771f5b7c2e56af94bb47da6672a29fa3d02a2324aca1e2c79c791b0a951abfb33f7fa164de2959c572bab04144  WCNSS_qcom_cfg.ini
 aa478da60b8191dc01d1b82a4438d203f694140cecfd4d66976a1c0ca118700adb642ef5daf6c55809d75e7c2ed5acdc82493e5ee7f7bd6ddc00b0f51aa6cef8  ucm-card.conf
-be503fb3e99fdc55cc8dc8d8450dacb8bcd0525e43f9467048d6c8fcaad610ae1454802714484cb47cfa259da4888ec7bb64f101181b0020f8aef24fe91ac333  ucm-HiFi.conf
-29a26a00b339ac6c67d047507d78b18479807fbf82e355418a0aa4d2f7fa019e1d46c0078d3b8cb612c78653a7c01085041e6ba40afc35b581063789b91c0f20  ucm-VoiceCall.conf
+d17dd3b299a24aa9bb38fec681e480a67b974d5b88ed700d8797b8443c57f3edf721e73b54c795d86d41a4797a837d771ee6cb4c9069ac0f1e003b7e0fe659d0  ucm-HiFi.conf
+fe0f3e618f24201b826f70885b10906287ca956d865776a36a7ee4e8f2236a10143dc0362c46b0c9c38f21173c5cc92c36ef283d5d7bb4bc9f46fa1a5aae15fb  ucm-VoiceCall.conf
 48c7268a5a75e402e79468bb3ad888a26e43d07fbdd18d29835139116912dd825c6a93870107b1b83589a6c0238a5ee1653d28c105c60d138421b93b50af7c5e  pulse-nosuspend.pa
 83a9e9c4bf684222c18946b2527eaf4e209d60fe6a7586b5c654d7442904a72d255c53588f1a1990eec7c685129381a754a20c9629eccda65ba5d7ba54369b69  pulse-rate.conf
 ec99a81a3b54469e616b011ce964c7ab06117242764d121f956b70696b039757294db3a78578267bb09c79e36e599c483c0dc1b9b33e48b12e397e7583000553  t385-audio-wake
@@ -203,8 +210,9 @@ f7d3e6af2b37d77220155dc884aa834555ab5ccaddda7b342ac6516acefa38cb479d8efc245c6a9e
 b120df387ef7230eade725e53a423a23193358defe61ba7cb62a2fc558b3d1947da938bb3d56952b559135fd3731ca67f53e4c0e7b9f70089868e57d20ae00c4  t385-modem-dpm.service
 4772179d262be8477a1c814580148cbf669610e0b7de238c8220bb3c3d5ed4a3710879a2f95750c598b961827e381cdd7cd57c990e490cb9f3c9cb34d3052f5f  t385-touch-kick.service
 eecca80da32c3e844e6aed207a113d174a5b71b4977ef4ad7ef4676d086c92f19db0e4915cffec4e06d1998b3652f6560c5c81d4b7304e0c61c99f01d3e01bdc  t385-touch-resume.service
-cc27afc7368213775e2c0fe7f08e135fea06907883c88b16990e5ad092b42f674d37acc42a18665dbb5aac7b2547e3ca5bf555922691206853c9944344866fde  t385-callaudio.py
-bca09f42dcdcb135fba6496b82a4643fdf976be01dc75edd50fddc4c0f28f6a27ad848176b03d782324809a6ed14b4204e4c8daa118933de323e215502506d4e  t385-callaudio.service
+da39c8869ec8adf90642d052479e406f4666ebd026f97f9b0da3cef3f7469e0a4c0a9e9433a29640c4091c99242dc8405072c59630d5128b2a91f2ef1b1dbadf  t385-callaudiod.py
+caca2de8d5005c2ff26985156d90b16ab4331d7cbc1382d3f53bc33db46be1fa1f9f2d3b659c289de571f10322341bd6a4300cf59ea9f02456317cb2108e473c  callaudio-dbus.service
+3e0908fb8225c9a9d517f86e4503712898196a5f1d36fecf1ef73901b0a80da57aa2a4bf69ed313bc40212580f1cbf26c06a1295b67267406ad78bf8c083e84d  q6voiced-t385.conf
 ace268d7ac48840e0dbd4ef96be4ef521a2abad4b17b07fb75b640eb168af1470a449ec01f8a77f290df47fb7e7531cfcc92d11d52896a4a8f81b21491810d66  feedbackd-gta2slte.json
 5a36dfd91baa9a9da70150e802d47278005343ea00b73bd6d985b834293366c544a6c0528a171e9748f491bbf4b7fbf24654fc936e0cc40aefb8a4c0a81044ee  73-t385-torch.rules
 3ff49cd94278153a777d8daa13a8c28bc6fca96ed12db8dd0860e72c54e9083389fdd486c3d5bc9d5766cc953481187f25573678dd31630ab5e445abc9e0244e  10-t385-lid.conf

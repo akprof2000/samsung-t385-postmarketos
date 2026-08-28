@@ -352,14 +352,17 @@
 		regulator-boot-on;
 	};
 
-	tlmm94_vreg: tlmm94_vreg {
-		compatible = "regulator-fixed";
-		regulator-name = "tlmm94_vreg";
-		gpio = <&tlmm 94 0>;
-		enable-active-high;
-		regulator-boot-on;
-		regulator-always-on;
-	};
+	/*
+	 * ЗДЕСЬ БЫЛ ФИКТИВНЫЙ РЕГУЛЯТОР tlmm94_vreg на GPIO94.
+	 *
+	 * Он достался нам из порта T380, потребителей не имел никогда и
+	 * просто держал ножку в высоком уровне. А GPIO94 входит в группу
+	 * линий MI2S к усилителю громкоговорителя (стоковый
+	 * sec_tlmm_lines: gpio94, gpio95, gpio12, gpio13). Пока ножка
+	 * была занята как обычный выход, усилитель не получал тактовый
+	 * сигнал: его регистр состояния показывал незахваченную ФАПЧ,
+	 * и динамик молчал.
+	 */
 
 	pericom_en: pericom_en {
 		compatible = "regulator-fixed";
@@ -1591,7 +1594,13 @@
 	 * маршрут не собирался, и наушники молчали бы.
 	 */
 	audio-routing =
-		"Speaker", "SPK_OUT",
+		/*
+		 * Динамик ведёт не кодек, а отдельный усилитель TFA9890
+		 * на квинарном MI2S — см. пояснение в конце файла.
+		 * Прежняя строка "Speaker", "SPK_OUT" вела в тупик:
+		 * выход кодека к динамику просто не подключён.
+		 */
+		"Speaker", "Speaker OUT",
 		"Headphones", "HPH_L",
 		"Headphones", "HPH_R",
 		"AMIC1", "MIC BIAS External1",
@@ -1684,3 +1693,120 @@
 	status = "okay";
 };
 
+
+/*
+ * ГРОМКОГОВОРИТЕЛЬ — внешний усилитель, а не выход кодека.
+ *
+ * Долгое время считалось, что динамик ведёт встроенный каскад кодека
+ * (SPK_OUT) или LINEOUT и что у него сгорел повышающий преобразователь.
+ * Опыт 28.08.2026 на живом устройстве это опроверг: с выключенным
+ * разговорным динамиком тишина полная при любом состоянии SPK и
+ * LINEOUT, а весь звук планшета идёт через наушный динамик у экрана.
+ *
+ * Разгадка нашлась в стоковом дереве Samsung:
+ *   - есть отдельная шина, подписанная "HW I2C for AMP" (BLSP1 QUP5,
+ *     0x7af6000, ножки GPIO22/23);
+ *   - включены линии вторичного MI2S (GPIO12, 13, 94, 95);
+ *   - а в qcom,audio-routing динамика нет вообще — только микрофоны.
+ * То есть звук к динамику идёт по вторичному MI2S через отдельную
+ * микросхему усилителя, которая настраивается по своей шине.
+ *
+ * В mainline по адресу 0x7af6000 объявлен только SPI, поэтому шины
+ * усилителя у нас не было вовсе. Объявляем её здесь, чтобы сперва
+ * узнать, что за микросхема там стоит.
+ */
+&soc {
+	blsp2_i2c2: i2c@7af6000 {
+		compatible = "qcom,i2c-qup-v2.2.1";
+		reg = <0x07af6000 0x600>;
+		interrupts = <GIC_SPI 300 IRQ_TYPE_LEVEL_HIGH>;
+		clocks = <&gcc GCC_BLSP2_QUP2_I2C_APPS_CLK>,
+			 <&gcc GCC_BLSP2_AHB_CLK>;
+		clock-names = "core", "iface";
+		dmas = <&blsp2_dma 6>, <&blsp2_dma 7>;
+		dma-names = "tx", "rx";
+		clock-frequency = <400000>;
+		pinctrl-0 = <&blsp2_i2c2_default>;
+		pinctrl-names = "default";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		status = "okay";
+	};
+};
+
+&tlmm {
+	/* Значения взяты из стокового i2c_6_active. */
+	blsp2_i2c2_default: blsp2-i2c2-default-state {
+		pins = "gpio22", "gpio23";
+		function = "blsp_i2c6";
+		drive-strength = <2>;
+		bias-disable;
+	};
+};
+
+/*
+ * Усилитель громкоговорителя NXP TFA9890.
+ *
+ * Опознан живым сканированием шины 28.08.2026: адрес 0x34, регистр
+ * ревизии 0x03 отдаёт 0x0080 — это ровно TFA9890_REVISION из драйвера
+ * tfa989x. Стоковое дерево держит для него отдельную шину I2C и
+ * объявляет квинарный MI2S (qcom,msm-dai-q6-mi2s-dev-id = <5>).
+ *
+ * Линия данных взята из стока: qcom,msm-mi2s-rx-lines = <2>, то есть
+ * вторая линия (SD1), а не первая, как по умолчанию в msm8917.dtsi.
+ */
+&blsp2_i2c2 {
+	speaker_codec: audio-codec@34 {
+		compatible = "nxp,tfa9890";
+		reg = <0x34>;
+		vddd-supply = <&pm8937_l5>;
+		sound-name-prefix = "Speaker";
+		#sound-dai-cells = <0>;
+	};
+};
+
+&q6afedai {
+	dai@127 {
+		reg = <QUINARY_MI2S_RX>;
+		qcom,sd-lines = <1>;
+	};
+};
+
+&sound {
+	pinctrl-0 = <&quat_mi2s_default>;
+	pinctrl-names = "default";
+
+	sound_link_speaker: speaker-dai-link {
+		link-name = "Quinary MI2S";
+
+		cpu {
+			sound-dai = <&q6afedai QUINARY_MI2S_RX>;
+		};
+		platform {
+			sound-dai = <&q6routing>;
+		};
+		codec {
+			sound-dai = <&speaker_codec>;
+		};
+	};
+};
+
+&tlmm {
+	/*
+	 * Ножки взяты из стокового sec_tlmm_lines_act. Имена здесь
+	 * расходятся трижды: функция контроллера зовётся sec_mi2s,
+	 * стоковое дерево Samsung называет эти линии quat_i2s, но
+	 * четверичный порт этот сопроцессор не поддерживает: на попытку
+	 * включить его тактовый сигнал он отвечает ошибкой
+	 * (cmd 0x100f3 -> error 0x2, "Failed to enable LPAIF bit clk").
+	 * Берём вторичный: только для него машинный драйвер выводит на
+	 * эти ножки MCLK, SCLK и DATA1 — вторую линию данных, ровно ту,
+	 * что указана в стоке (qcom,msm-mi2s-rx-lines = <2>).
+	 */
+	quat_mi2s_default: quat-mi2s-default-state {
+		pins = "gpio12", "gpio13", "gpio94", "gpio95";
+		function = "sec_mi2s";
+		drive-strength = <8>;
+		bias-disable;
+	};
+};
