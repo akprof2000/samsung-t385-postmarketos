@@ -1,0 +1,59 @@
+Subject: [PATCH] ASoC: apq8016_sbc: опорный тактовый сигнал для внешнего усилителя
+
+У SM-T385 громкоговоритель ведёт отдельный усилитель NXP TFA9890 на
+шине MI2S. Драйвер включает только битовый такт, и выводы LPASS
+остаются немыми: прямое чтение уровней TLMM показывает, что ни одна
+ножка группы не меняет состояния во время потока.
+
+Стоковая прошивка задаёт qcom,msm-mclk-freq = <9600000>, а настройка
+вывода на ножки (spkr-iomux) выставляет в том числе TLMM_MCLK_EN.
+
+--- a/sound/soc/qcom/apq8016_sbc.c	2026-08-28 14:38:45.808711610 +0300
++++ b/sound/soc/qcom/apq8016_sbc.c	2026-08-28 14:42:03.345546379 +0300
+@@ -200,6 +200,17 @@
+ 	return apq8016_dai_init(rtd, qdsp6_dai_get_lpass_id(cpu_dai));
+ }
+ 
++/*
++ * Порты, на которых может висеть внешний усилитель. Встроенный
++ * кодек сидит на первичном (вниз) и третичном (вверх) — их не
++ * трогаем: там опорный сигнал наружу не нужен.
++ */
++static bool msm8916_qdsp6_needs_mclk(int mi2s)
++{
++	return mi2s == MI2S_SECONDARY || mi2s == MI2S_QUATERNARY ||
++	       mi2s == MI2S_QUINARY;
++}
++
+ static int msm8916_qdsp6_startup(struct snd_pcm_substream *substream)
+ {
+ 	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
+@@ -218,6 +229,14 @@
+ 	ret = snd_soc_dai_set_sysclk(cpu_dai, LPAIF_BIT_CLK, MI2S_BCLK_RATE, 0);
+ 	if (ret)
+ 		dev_err(card->dev, "Failed to enable LPAIF bit clk: %d\n", ret);
++
++	if (!ret && msm8916_qdsp6_needs_mclk(mi2s)) {
++		int osr = snd_soc_dai_set_sysclk(cpu_dai, LPAIF_OSR_CLK,
++		                                 DEFAULT_MCLK_RATE, 0);
++		if (osr)
++			dev_err(card->dev,
++				"Failed to enable LPAIF osr clk: %d\n", osr);
++	}
+ 	return ret;
+ }
+ 
+@@ -236,6 +255,13 @@
+ 	if (--data->mi2s_clk_count[mi2s] > 0)
+ 		return;
+ 
++	if (msm8916_qdsp6_needs_mclk(mi2s)) {
++		ret = snd_soc_dai_set_sysclk(cpu_dai, LPAIF_OSR_CLK, 0, 0);
++		if (ret)
++			dev_err(card->dev,
++				"Failed to disable LPAIF osr clk: %d\n", ret);
++	}
++
+ 	ret = snd_soc_dai_set_sysclk(cpu_dai, LPAIF_BIT_CLK, 0, 0);
+ 	if (ret)
+ 		dev_err(card->dev, "Failed to disable LPAIF bit clk: %d\n", ret);
