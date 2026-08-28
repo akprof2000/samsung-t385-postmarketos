@@ -1,0 +1,81 @@
+Subject: [PATCH] media: s5k4h5/s5k5e3: перечисление размеров кадра
+
+Без .enum_frame_size libcamera строит пустой список форматов
+("No image format found"), и камера не появляется ни в одном
+приложении: ни в GNOME Камере, ни где-либо ещё через PipeWire.
+Режим у обоих датчиков один — полный кадр.
+
+--- a/drivers/media/i2c/s5k4h5.c	2026-08-28 22:11:20.001053362 +0300
++++ b/drivers/media/i2c/s5k4h5.c	2026-08-28 22:11:20.001053362 +0300
+@@ -373,6 +373,26 @@
+ 	return 0;
+ }
+ 
++/*
++ * Перечисление размеров кадра. Режим у датчика один — полный кадр, но
++ * без этого обработчика libcamera не видит ни одного формата ("No image
++ * format found"), и камера не появляется ни в одном приложении.
++ */
++static int s5k4h5_enum_frame_size(struct v4l2_subdev *sd,
++				  struct v4l2_subdev_state *state,
++				  struct v4l2_subdev_frame_size_enum *fse)
++{
++	if (fse->index || fse->code != MEDIA_BUS_FMT_SGRBG10_1X10)
++		return -EINVAL;
++
++	fse->min_width = S5K4H5_WIDTH;
++	fse->max_width = S5K4H5_WIDTH;
++	fse->min_height = S5K4H5_HEIGHT;
++	fse->max_height = S5K4H5_HEIGHT;
++
++	return 0;
++}
++
+ static void s5k4h5_update_fmt(struct v4l2_mbus_framefmt *fmt)
+ {
+ 	fmt->width = S5K4H5_WIDTH;
+@@ -406,6 +426,7 @@
+ 
+ static const struct v4l2_subdev_pad_ops s5k4h5_pad_ops = {
+ 	.enum_mbus_code = s5k4h5_enum_mbus_code,
++	.enum_frame_size = s5k4h5_enum_frame_size,
+ 	.get_fmt = v4l2_subdev_get_fmt,
+ 	.set_fmt = s5k4h5_set_fmt,
+ };
+--- a/drivers/media/i2c/s5k5e3.c	2026-08-28 22:11:20.001053362 +0300
++++ b/drivers/media/i2c/s5k5e3.c	2026-08-28 22:11:20.001053362 +0300
+@@ -385,6 +385,26 @@
+ 	return 0;
+ }
+ 
++/*
++ * Перечисление размеров кадра. Режим у датчика один — полный кадр, но
++ * без этого обработчика libcamera не видит ни одного формата ("No image
++ * format found"), и камера не появляется ни в одном приложении.
++ */
++static int s5k5e3_enum_frame_size(struct v4l2_subdev *sd,
++				  struct v4l2_subdev_state *state,
++				  struct v4l2_subdev_frame_size_enum *fse)
++{
++	if (fse->index || fse->code != MEDIA_BUS_FMT_SGRBG10_1X10)
++		return -EINVAL;
++
++	fse->min_width = S5K5E3_WIDTH;
++	fse->max_width = S5K5E3_WIDTH;
++	fse->min_height = S5K5E3_HEIGHT;
++	fse->max_height = S5K5E3_HEIGHT;
++
++	return 0;
++}
++
+ static void s5k5e3_update_fmt(struct v4l2_mbus_framefmt *fmt)
+ {
+ 	fmt->width = S5K5E3_WIDTH;
+@@ -418,6 +438,7 @@
+ 
+ static const struct v4l2_subdev_pad_ops s5k5e3_pad_ops = {
+ 	.enum_mbus_code = s5k5e3_enum_mbus_code,
++	.enum_frame_size = s5k5e3_enum_frame_size,
+ 	.get_fmt = v4l2_subdev_get_fmt,
+ 	.set_fmt = s5k5e3_set_fmt,
+ };
