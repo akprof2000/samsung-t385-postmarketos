@@ -1,0 +1,83 @@
+Subject: [PATCH] media: s5k4h5/s5k5e3: угол установки и сторона камеры
+
+Без этих сведений libcamera не знает, что модуль стоит повёрнутым:
+фронтальная камера показывает картинку вверх ногами. Заодно
+приложение не может отличить переднюю камеру от задней.
+Значения уже есть в дереве устройства (rotation, orientation).
+
+--- a/drivers/media/i2c/s5k4h5.c	2026-08-28 23:09:09.930426934 +0300
++++ b/drivers/media/i2c/s5k4h5.c	2026-08-28 23:09:09.940475374 +0300
+@@ -425,7 +425,7 @@
+ 	int exp_max = S5K4H5_FLL - S5K4H5_EXPOSURE_MARGIN;
+ 	int ret;
+ 
+-	ret = v4l2_ctrl_handler_init(hdl, 6);
++	ret = v4l2_ctrl_handler_init(hdl, 8);
+ 	if (ret)
+ 		return ret;
+ 
+@@ -460,6 +460,26 @@
+ 				       S5K4H5_ANA_GAIN_MAX, 1,
+ 				       S5K4H5_ANA_GAIN_DEFAULT);
+ 
++	/*
++	 * Угол установки модуля и сторона (передняя/задняя). Без этих
++	 * сведений libcamera показывает картинку вверх ногами и не может
++	 * подписать камеры. Значения берутся из дерева устройства
++	 * (свойства rotation и orientation), как принято в mainline.
++	 */
++	{
++		struct v4l2_fwnode_device_properties props;
++		int pret;
++
++		pret = v4l2_fwnode_device_parse(s5k->dev, &props);
++		if (pret)
++			return pret;
++
++		pret = v4l2_ctrl_new_fwnode_properties(hdl, &s5k4h5_ctrl_ops,
++						       &props);
++		if (pret)
++			return pret;
++	}
++
+ 	if (hdl->error) {
+ 		ret = hdl->error;
+ 		v4l2_ctrl_handler_free(hdl);
+--- a/drivers/media/i2c/s5k5e3.c	2026-08-28 23:09:09.940475374 +0300
++++ b/drivers/media/i2c/s5k5e3.c	2026-08-28 23:09:09.940475374 +0300
+@@ -437,7 +437,7 @@
+ 	int exp_max = S5K5E3_FLL - S5K5E3_EXPOSURE_MARGIN;
+ 	int ret;
+ 
+-	ret = v4l2_ctrl_handler_init(hdl, 6);
++	ret = v4l2_ctrl_handler_init(hdl, 8);
+ 	if (ret)
+ 		return ret;
+ 
+@@ -472,6 +472,26 @@
+ 				       S5K5E3_ANA_GAIN_MAX, 1,
+ 				       S5K5E3_ANA_GAIN_DEFAULT);
+ 
++	/*
++	 * Угол установки модуля и сторона (передняя/задняя). Без этих
++	 * сведений libcamera показывает картинку вверх ногами и не может
++	 * подписать камеры. Значения берутся из дерева устройства
++	 * (свойства rotation и orientation), как принято в mainline.
++	 */
++	{
++		struct v4l2_fwnode_device_properties props;
++		int pret;
++
++		pret = v4l2_fwnode_device_parse(s5k->dev, &props);
++		if (pret)
++			return pret;
++
++		pret = v4l2_ctrl_new_fwnode_properties(hdl, &s5k5e3_ctrl_ops,
++						       &props);
++		if (pret)
++			return pret;
++	}
++
+ 	if (hdl->error) {
+ 		ret = hdl->error;
+ 		v4l2_ctrl_handler_free(hdl);
