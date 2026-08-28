@@ -1,0 +1,40 @@
+Subject: [PATCH] ASoC: qcom: верный тактовый сигнал для четверичного MI2S
+
+q6afe_get_v2_bit_clk_id возвращает для четверичного порта идентификатор
+третичного — очевидная описка. Сопроцессор на это отвечает отказом
+(cmd 0x100f3 -> error 0x2), и внешний усилитель на этом порту остаётся
+без такта. Стоковый драйвер Qualcomm возвращает здесь QUAD_MI2S_IBIT.
+
+Заодно у msm8917 мультиплексору нужен ещё один бит, которого нет у
+msm8916: сток пишет 0x02020002, mainline — только 0x00020002.
+
+--- a/sound/soc/qcom/qdsp6/q6afe.c	2026-08-28 16:49:06.297171626 +0300
++++ b/sound/soc/qcom/qdsp6/q6afe.c	2026-08-28 16:49:06.297171626 +0300
+@@ -1250,7 +1250,7 @@
+ 		return Q6AFE_LPASS_CLK_ID_TER_MI2S_IBIT;
+ 	case AFE_PORT_ID_QUATERNARY_MI2S_RX:
+ 	case AFE_PORT_ID_QUATERNARY_MI2S_TX:
+-		return Q6AFE_LPASS_CLK_ID_TER_MI2S_IBIT;
++		return Q6AFE_LPASS_CLK_ID_QUAD_MI2S_IBIT;
+ 	case AFE_PORT_ID_QUINARY_MI2S_RX:
+ 	case AFE_PORT_ID_QUINARY_MI2S_TX:
+ 		return Q6AFE_LPASS_CLK_ID_QUI_MI2S_IBIT;
+--- a/sound/soc/qcom/apq8016_sbc.c	2026-08-28 16:49:06.297171626 +0300
++++ b/sound/soc/qcom/apq8016_sbc.c	2026-08-28 16:49:06.297171626 +0300
+@@ -34,6 +34,7 @@
+ 
+ #define MIC_CTRL_TER_WS_SLAVE_SEL	BIT(21)
+ #define MIC_CTRL_QUA_WS_SLAVE_SEL_10	BIT(17)
++#define MIC_CTRL_QUA_TLMM_DATA_EN	BIT(25)
+ #define MIC_CTRL_TLMM_SCLK_EN		BIT(1)
+ #define	SPKR_CTL_PRI_WS_SLAVE_SEL_11	(BIT(17) | BIT(16))
+ #define SPKR_CTL_TLMM_MCLK_EN		BIT(1)
+@@ -75,7 +76,7 @@
+ 	case MI2S_QUATERNARY:
+ 		/* Configure the Quat MI2S to TLMM */
+ 		writel(readl(pdata->mic_iomux) | MIC_CTRL_QUA_WS_SLAVE_SEL_10 |
+-			MIC_CTRL_TLMM_SCLK_EN,
++			MIC_CTRL_TLMM_SCLK_EN | MIC_CTRL_QUA_TLMM_DATA_EN,
+ 			pdata->mic_iomux);
+ 		break;
+ 	case MI2S_SECONDARY:

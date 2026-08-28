@@ -1766,8 +1766,8 @@
 };
 
 &q6afedai {
-	dai@127 {
-		reg = <QUINARY_MI2S_RX>;
+	dai@22 {
+		reg = <QUATERNARY_MI2S_RX>;
 		qcom,sd-lines = <1>;
 	};
 };
@@ -1777,10 +1777,10 @@
 	pinctrl-names = "default";
 
 	sound_link_speaker: speaker-dai-link {
-		link-name = "Quinary MI2S";
+		link-name = "Quaternary MI2S";
 
 		cpu {
-			sound-dai = <&q6afedai QUINARY_MI2S_RX>;
+			sound-dai = <&q6afedai QUATERNARY_MI2S_RX>;
 		};
 		platform {
 			sound-dai = <&q6routing>;
