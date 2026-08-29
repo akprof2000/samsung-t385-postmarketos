@@ -3,7 +3,7 @@ maintainer="Robert Mader <robert.mader@collabora.com>"
 pkgname=libcamera
 _pkgver=0.7.2
 pkgver=9999$_pkgver
-pkgrel=4
+pkgrel=7
 pkgdesc="Linux camera framework"
 url="https://libcamera.org/"
 arch="all"
@@ -61,6 +61,7 @@ source="https://gitlab.freedesktop.org/camera/libcamera/-/archive/v$_pkgver/libc
 	0002-libcamera-simple-Skip-hwISP-formats-if-swISP-is-acti.patch
 	0003-add-t385-sensors.patch
 	0004-cap-softisp-size.patch
+	0005-complete-requests-on-stop.patch
 	qcam.desktop
 	$_tuning_files
 	"
@@ -178,7 +179,8 @@ b317cdc96f61682ee0bf26dfb7c4d6441db9a9c5b93ab53528121a8cd44862b3d59cbaa3881bb083
 eef5e38efc874f2049d17f08b04d9f21c3e4616f66873358cd2c446e651f78d6952ae25ee13a6ef917e3f85bc7b6a6991152e42c8efd8c7f5bff69829a518826  0001-libcamera-simple-Enable-softISP-for-the-Pinephone.patch
 191dfa09cfd08bcdf0d0d07410d17af590cf78b8bc8f8b7587fd2dc1c645a9ca07f2926b5d98381c011319b1f4e1d6195dd0d6dba65fd8c723882e6be0d6117d  0002-libcamera-simple-Skip-hwISP-formats-if-swISP-is-acti.patch
 4a256ab98d1789fb07782994ec8732b601181d4585f0d44508399fcbc42ba58dcbfa2333dec2bca594839440db4dde5560e60d8bf636485975797c47da00f7a7  0003-add-t385-sensors.patch
-cba4fad9fae7507f41baa651fbbcdfad6e7f6e099f902d9f70076cdac2baee01c6fad98d4b92b4f23e501fccc76071043caa06d92394ce6c13b484db20c47880  0004-cap-softisp-size.patch
+0a1b4ed958a5d08ffa2fbb552e78503215936c40b8aafc99337db94ec645403762903096476e5f0c68f6876d157e63207473d8f446cc1584f1ca859f458a98d6  0004-cap-softisp-size.patch
+811cc6555d6e9f3a2349862d2060b0a0bfc7b6455446ad73f8ce7879ce6c3512f1e3cc178b69143c1065d8d5ed142b0a314b1cd50bb552341350467ee6c2939c  0005-complete-requests-on-stop.patch
 22167a4eceb6d1b40b0b7c45fdf116c71684f5340de7f767535cb8e160ad9d2ae0f00cb3d461f73a344520a48a4641cf46226841d78bee06bfbfd2a91337f754  qcam.desktop
 2ee566653b17d565d2c0de67cbe6ebad25df5aac6051cad78e6bae52016fa2ca0247e964d735ac776b3e0bd447ead9c4fcb26cd7629228cdba3ceb91b46f378f  hi846.yaml
 55dab9dcb9b1982143b9d63e4e51138c5bffd7c8f4a8e4e122750b3ad9d475446956bc297d9f564819ade4be75a575d06633a064e14f8ba3ef77986783c5f067  imx355.yaml

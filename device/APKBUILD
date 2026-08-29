@@ -15,7 +15,7 @@
 pkgname=device-samsung-gta2slte
 pkgdesc="Samsung Galaxy Tab A 8.0 (2017) LTE"
 pkgver=0.1
-pkgrel=31
+pkgrel=32
 url="https://postmarketos.org"
 license="MIT"
 arch="aarch64"
@@ -46,6 +46,7 @@ subpackages="
 
 source="
 	deviceinfo
+	libcamera-configuration.yaml
 	modules-initfs
 	99-unmanaged-usb0.conf
 	WCNSS_qcom_wlan_nv.bin
@@ -86,6 +87,12 @@ package() {
 	# usb0 отдаём под отладочный SSH — NetworkManager его не трогает
 	install -Dm644 "$srcdir"/99-unmanaged-usb0.conf \
 		"$pkgdir"/etc/NetworkManager/conf.d/99-unmanaged-usb0.conf
+
+	# Камера: цвет собирает процессор, а не видеоядро. Путь через
+	# видеоядро роняет службу звука и видео, и приложение теряет
+	# изображение. Подробности — в самом файле.
+	install -Dm644 "$srcdir"/libcamera-configuration.yaml \
+		"$pkgdir"/etc/libcamera/configuration.yaml
 
 	# ALSA UCM. Без него PipeWire карту видит, но переключать наушники
 	# и микрофоны не умеет. ALSA ищет конфиг по имени карты из &sound,
@@ -190,6 +197,7 @@ nonfree_firmware() {
 
 sha512sums="
 89401904af71d140451b1f6c514ef6628ac40fa64aca088367cea1aac1c2b5ab8be3f1c51ca4e9e48c07c32194bef63b26f11370af87ead6d3fdcacace3793cd  deviceinfo
+7eb59e73a1460f7a21642863b7fb4a90d36c11deaac6e9e7516124db291b2dbdfeaf25b2301b587b78a47e202968472e155e0c8d3a32ccf9087b18f85c86c0c6  libcamera-configuration.yaml
 e93c9204b5bf6caac83915d981e8b4c1d4097c47b8798fe1371e6efe447e2be7e689f81a25c37ea503d0d84aff2320fe38bff3522a246b0f1b54c3b3633e0fcf  modules-initfs
 c0761451823623cbc4f30365709d58160eddbdf86ee3795d3fd7451112a45b237b83981bbd1b93c6c243996b86bce5334d34a57141d8ed047101128a2d40737d  99-unmanaged-usb0.conf
 691a3027164f4933e2b6cb60f3b676d05a2b0595eaae6395a841061ea672635089d3d0f1e30beea36472bbfc66152fdee0c858442c5b1853cff4baf54ae18f5f  WCNSS_qcom_wlan_nv.bin

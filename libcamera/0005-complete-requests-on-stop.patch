@@ -1,0 +1,50 @@
+--- a/src/libcamera/pipeline/simple/simple.cpp
++++ b/src/libcamera/pipeline/simple/simple.cpp
+@@ -206,6 +206,7 @@
+ 	void create(Request *request, bool metadataRequested);
+ 	void destroy(uint32_t frame);
+ 	void clear();
++	void dropMetadataRequirement();
+ 
+ 	SimpleFrameInfo *find(uint32_t frame);
+ 
+@@ -230,6 +231,18 @@
+ 	frameInfo_.clear();
+ }
+ 
++/*
++ * Снять со всех кадров в работе требование метаданных.
++ *
++ * Применяется при остановке: обработчик автоматики глушится раньше,
++ * чем возвращаются буферы, и метаданных эти кадры уже не получат.
++ */
++void SimpleFrames::dropMetadataRequirement()
++{
++	for (auto &[frame, info] : frameInfo_)
++		info.metadataRequired = false;
++}
++
+ SimpleFrameInfo *SimpleFrames::find(uint32_t frame)
+ {
+ 	auto info = frameInfo_.find(frame);
+@@ -1738,6 +1751,20 @@
+ 							 &DelayedControls::applyControls);
+ 	}
+ 
++	/*
++	 * Кадры, оставшиеся в обработке, метаданных уже не получат:
++	 * SoftwareIsp::stop() сначала глушит модуль автоматики и лишь
++	 * затем возвращает отменённые буферы. Без этой строки
++	 * tryCompleteRequest() выходит по проверке metadataRequired,
++	 * запрос навсегда остаётся в очереди — и libcamera обрывает
++	 * работу по ASSERT(queuedRequests_.empty()) в
++	 * PipelineHandler::stop(). На медленном устройстве, где в
++	 * обработке всегда есть кадр, это происходит при каждой
++	 * остановке камеры: служба звука и видео падает, узлы камер
++	 * исчезают, и приложение теряет изображение.
++	 */
++	data->frameInfo_.dropMetadataRequirement();
++
+ 	if (data->useConversion_) {
+ 		if (data->converter_)
+ 			data->converter_->stop();
