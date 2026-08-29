@@ -2,7 +2,7 @@ maintainer="Barnabas Czeman <barnabas.czeman@postmarketos.org>"
 _flavor="postmarketos-qcom-msm89x7"
 pkgname=linux-postmarketos-qcom-msm89x7
 pkgver=7.1.3
-pkgrel=79
+pkgrel=80
 pkgdesc="Mainline kernel fork for Qualcomm QM215/MSM8917/MSM8937/MSM8940/SDM429/SDM439 devices"
 arch="aarch64"
 _carch="arm64"
@@ -48,6 +48,7 @@ source="
 	0013-sensors-enum-frame-size.patch
 	0014-sensors-orientation.patch
 	0015-s5k4h5-preview-mode.patch
+	0016-camss-one-csid-per-csiphy.patch
 "
 builddir="$srcdir/linux-$_tag"
 
@@ -104,4 +105,5 @@ d189ba5f2742c7f2789523bb67c8e65753eb2c3bc1b882480ea405a2019aaa482c23743cdc1422e6
 f35b49f87dc07d883597cb59cc9e7d670269b31009048f7e158856b51dd8de64a36097a1ee1246e45562f72bf3b9713b53df2ca3708975e5376859264505a684  0013-sensors-enum-frame-size.patch
 573b4392979ca50ae60d08b7227ca4e96354c21bfd40aef08b4de14b46141587e951aae2523fed58bde73cb895331a93090cf1786400db4f004c81dd0e3f877a  0014-sensors-orientation.patch
 855ea244c9af7d2ee878574e1cb6c3ef96710fd5cc519aa58f46268140a2ac83fd270280551809b6f6f8634b646c847fc8104c9a25848135ef2f1a3542d524a9  0015-s5k4h5-preview-mode.patch
+5fd55c56e509d3f8f503321272e12ee0f1bb6a6a943b043a1339cf4ad5113977a93028156dba46a99f6fafdd1d2c2c644d50499fc5e47a284b702ce4532d3422  0016-camss-one-csid-per-csiphy.patch
 "
