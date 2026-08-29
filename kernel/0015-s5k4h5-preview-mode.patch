@@ -8,7 +8,7 @@ Subject: [PATCH] media: s5k4h5/s5k5e3: режимы предпросмотра
 одинаковы, различается только число строк в кадре.
 
 --- a/drivers/media/i2c/s5k4h5.c	2026-08-29 09:08:02.754642092 +0300
-+++ b/drivers/media/i2c/s5k4h5.c	2026-08-29 09:08:02.794698979 +0300
++++ b/drivers/media/i2c/s5k4h5.c	2026-08-29 10:58:59.206143599 +0300
 @@ -60,7 +60,8 @@
  	u8 val;
  };
@@ -190,9 +190,7 @@ Subject: [PATCH] media: s5k4h5/s5k5e3: режимы предпросмотра
 + * в пропорциях.
 + */
 +static const struct s5k4h5_mode *s5k4h5_find_mode(u32 width, u32 height)
- {
--	fmt->width = S5K4H5_WIDTH;
--	fmt->height = S5K4H5_HEIGHT;
++{
 +	const struct s5k4h5_mode *best = &s5k4h5_modes[0];
 +	s64 want = (s64)width * height;
 +	s64 diff = S64_MAX;
@@ -227,7 +225,9 @@ Subject: [PATCH] media: s5k4h5/s5k5e3: режимы предпросмотра
 +
 +static void s5k4h5_update_fmt(struct v4l2_mbus_framefmt *fmt,
 +			      const struct s5k4h5_mode *mode)
-+{
+ {
+-	fmt->width = S5K4H5_WIDTH;
+-	fmt->height = S5K4H5_HEIGHT;
 +	fmt->width = mode->width;
 +	fmt->height = mode->height;
  	fmt->code = MEDIA_BUS_FMT_SGRBG10_1X10;
@@ -262,8 +262,23 @@ Subject: [PATCH] media: s5k4h5/s5k5e3: режимы предпросмотра
  	return 0;
  }
  
+@@ -540,6 +686,14 @@
+ 	if (!s5k)
+ 		return -ENOMEM;
+ 
++	/*
++	 * Режим по умолчанию — полный кадр. Задать его надо здесь:
++	 * обработчик управляющих элементов обращается к режиму ещё
++	 * до первого выбора формата, и без этого ядро падает по
++	 * пустому указателю.
++	 */
++	s5k->mode = &s5k4h5_modes[0];
++
+ 	s5k->dev = dev;
+ 
+ 	s5k->regmap = devm_cci_regmap_init_i2c(client, 16);
 --- a/drivers/media/i2c/s5k5e3.c	2026-08-29 09:08:02.754642092 +0300
-+++ b/drivers/media/i2c/s5k5e3.c	2026-08-29 09:08:02.814727423 +0300
++++ b/drivers/media/i2c/s5k5e3.c	2026-08-29 10:58:59.206143599 +0300
 @@ -157,7 +157,8 @@
  	{ 0x0100, 0x01 },
  };
@@ -493,3 +508,18 @@ Subject: [PATCH] media: s5k4h5/s5k5e3: режимы предпросмотра
  	return 0;
  }
  
+@@ -552,6 +681,14 @@
+ 	if (!s5k)
+ 		return -ENOMEM;
+ 
++	/*
++	 * Режим по умолчанию — полный кадр. Задать его надо здесь:
++	 * обработчик управляющих элементов обращается к режиму ещё
++	 * до первого выбора формата, и без этого ядро падает по
++	 * пустому указателю.
++	 */
++	s5k->mode = &s5k5e3_modes[0];
++
+ 	s5k->dev = dev;
+ 
+ 	s5k->regmap = devm_cci_regmap_init_i2c(client, 16);
