@@ -1,0 +1,73 @@
+Subject: [PATCH] добавить датчики S5K4H5 и S5K5E3 (Samsung SM-T385)
+
+Без записи в базе libcamera не знает ни размера пикселя, ни задержек
+датчика; без помощника пересчёта не работает автоматическое усиление
+("Failed to create camera sensor helper"), и автоэкспозиция может
+менять только выдержку. Усиление у обоих линейное: регистр 0x0204,
+база 32 = однократное, потолок 512 = 16x.
+
+--- a/src/libcamera/sensor/camera_sensor_properties.cpp	2026-08-29 09:46:26.021999771 +0300
++++ b/src/libcamera/sensor/camera_sensor_properties.cpp	2026-08-29 09:46:26.021999771 +0300
+@@ -210,6 +210,26 @@
+ 				.hblankDelay = 2
+ 			},
+ 		} },
++		{ "s5k4h5", {
++			.unitCellSize = { 1120, 1120 },
++			.testPatternModes = {},
++			.sensorDelays = {
++				.exposureDelay = 2,
++				.gainDelay = 2,
++				.vblankDelay = 2,
++				.hblankDelay = 2
++			},
++		} },
++		{ "s5k5e3", {
++			.unitCellSize = { 1120, 1120 },
++			.testPatternModes = {},
++			.sensorDelays = {
++				.exposureDelay = 2,
++				.gainDelay = 2,
++				.vblankDelay = 2,
++				.hblankDelay = 2
++			},
++		} },
+ 		{ "imx258", {
+ 			.unitCellSize = { 1120, 1120 },
+ 			.testPatternModes = {
+--- a/src/ipa/libipa/camera_sensor_helper.cpp	2026-08-29 09:46:26.021999771 +0300
++++ b/src/ipa/libipa/camera_sensor_helper.cpp	2026-08-29 09:46:26.021999771 +0300
+@@ -554,6 +554,33 @@
+ };
+ REGISTER_CAMERA_SENSOR_HELPER("imx219", CameraSensorHelperImx219)
+ 
++/*
++ * Samsung S5K4H5 и S5K5E3 (SM-T385): усиление задаётся регистром 0x0204
++ * напрямую, база 32 соответствует однократному, потолок 512 — 16x.
++ * Чёрный пьедестал 64 при 10 битах.
++ */
++class CameraSensorHelperS5k4h5 : public CameraSensorHelper
++{
++public:
++	CameraSensorHelperS5k4h5()
++	{
++		blackLevel_ = 4096;
++		gain_ = AnalogueGainLinear{ 1, 0, 0, 32 };
++	}
++};
++REGISTER_CAMERA_SENSOR_HELPER("s5k4h5", CameraSensorHelperS5k4h5)
++
++class CameraSensorHelperS5k5e3 : public CameraSensorHelper
++{
++public:
++	CameraSensorHelperS5k5e3()
++	{
++		blackLevel_ = 4096;
++		gain_ = AnalogueGainLinear{ 1, 0, 0, 32 };
++	}
++};
++REGISTER_CAMERA_SENSOR_HELPER("s5k5e3", CameraSensorHelperS5k5e3)
++
+ class CameraSensorHelperImx258 : public CameraSensorHelper
+ {
+ public:
