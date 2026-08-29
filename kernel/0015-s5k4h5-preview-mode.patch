@@ -1,13 +1,14 @@
-Subject: [PATCH] media: s5k4h5: режим предпросмотра 816x460
+Subject: [PATCH] media: s5k4h5/s5k5e3: режимы предпросмотра
 
-Единственный режим 3264x2448 давал 32 МБ на кадр после обработки:
-при 1.3 ГБ памяти это роняло планшет вместе с видеоядром, а показ
-шёл на 5 кадрах в секунду. Таблица уменьшенного режима взята из
-стоковой библиотеки libmmcamera_s5k4h5yc.so; ФАПЧ у обоих режимов
-одинакова, различаются только длина строки и число строк.
+Единственный полный кадр (8 Мп у задней, 5 Мп у фронтальной) давал
+десятки мегабайт на кадр после обработки: показ шёл на 5 кадрах в
+секунду и ронял планшет вместе с видеоядром, а фронтальная камера
+вовсе не запускалась. Таблицы уменьшенных режимов (816x460 и
+640x480) взяты из стоковых библиотек; тактовые настройки у режимов
+одинаковы, различается только число строк в кадре.
 
---- a/drivers/media/i2c/s5k4h5.c	2026-08-29 08:36:18.006842159 +0300
-+++ b/drivers/media/i2c/s5k4h5.c	2026-08-29 08:36:18.043508825 +0300
+--- a/drivers/media/i2c/s5k4h5.c	2026-08-29 09:08:02.754642092 +0300
++++ b/drivers/media/i2c/s5k4h5.c	2026-08-29 09:08:02.794698979 +0300
 @@ -60,7 +60,8 @@
  	u8 val;
  };
@@ -258,6 +259,237 @@ Subject: [PATCH] media: s5k4h5: режим предпросмотра 816x460
 -	s5k4h5_update_fmt(v4l2_subdev_state_get_format(state, 0));
 +	s5k4h5_update_fmt(v4l2_subdev_state_get_format(state, 0),
 +			  &s5k4h5_modes[0]);
+ 	return 0;
+ }
+ 
+--- a/drivers/media/i2c/s5k5e3.c	2026-08-29 09:08:02.754642092 +0300
++++ b/drivers/media/i2c/s5k5e3.c	2026-08-29 09:08:02.814727423 +0300
+@@ -157,7 +157,8 @@
+ 	{ 0x0100, 0x01 },
+ };
+ 
+-static const struct s5k_reg s5k5e3_preview_setting[] = {
++/* Полный кадр 2576x1932 — для съёмки. */
++static const struct s5k_reg s5k5e3_mode_full[] = {
+ 	{ 0x0100, 0x00 },
+ 	{ 0x0305, 0x06 },
+ 	{ 0x0306, 0x00 },
+@@ -207,6 +208,84 @@
+ 	{ 0x0100, 0x01 },
+ };
+ 
++/*
++ * Уменьшенный кадр 640x480 — для предпросмотра. Взят из стоковой
++ * библиотеки: биннинг 4x4, кадр в двадцать раз легче. Тактовые
++ * настройки у обоих режимов одинаковы, различается только число
++ * строк в кадре.
++ */
++static const struct s5k_reg s5k5e3_mode_preview[] = {
++	{ 0x0305, 0x06 },
++	{ 0x0306, 0x00 },
++	{ 0x0307, 0xe0 },
++	{ 0x3c1f, 0x00 },
++	{ 0x0820, 0x03 },
++	{ 0x0821, 0x80 },
++	{ 0x3c1c, 0x58 },
++	{ 0x0114, 0x01 },
++	{ 0x0340, 0x01 },
++	{ 0x0341, 0xfa },
++	{ 0x0342, 0x0b },
++	{ 0x0343, 0x86 },
++	{ 0x0344, 0x00 },
++	{ 0x0345, 0x08 },
++	{ 0x0346, 0x00 },
++	{ 0x0347, 0x08 },
++	{ 0x0348, 0x0a },
++	{ 0x0349, 0x05 },
++	{ 0x034a, 0x07 },
++	{ 0x034b, 0x87 },
++	{ 0x034c, 0x02 },
++	{ 0x034d, 0x80 },
++	{ 0x034e, 0x01 },
++	{ 0x034f, 0xe0 },
++	{ 0x0900, 0x01 },
++	{ 0x0901, 0x44 },
++	{ 0x0383, 0x03 },
++	{ 0x0387, 0x07 },
++	{ 0x0204, 0x00 },
++	{ 0x0205, 0x20 },
++	{ 0x0202, 0x01 },
++	{ 0x0203, 0xf4 },
++	{ 0x0200, 0x04 },
++	{ 0x0201, 0x98 },
++	{ 0x3941, 0x04 },
++	{ 0x3942, 0xb5 },
++	{ 0x3924, 0x2f },
++	{ 0x3925, 0x10 },
++	{ 0x3c31, 0x54 },
++	{ 0x3c32, 0x60 },
++	{ 0x3c08, 0x5d },
++	{ 0x3c09, 0xc0 },
++	{ 0x3320, 0x01 },
++	{ 0x0112, 0x0a },
++	{ 0x0113, 0x0a },
++};
++
++struct s5k5e3_mode {
++	u32 width;
++	u32 height;
++	u32 llp;		/* длина строки в тактах */
++	u32 fll;		/* строк в кадре */
++	const struct s5k_reg *regs;
++	unsigned int nregs;
++};
++
++static const struct s5k5e3_mode s5k5e3_modes[] = {
++	{
++		.width = 2576, .height = 1932,
++		.llp = 2950, .fll = 2025,
++		.regs = s5k5e3_mode_full,
++		.nregs = ARRAY_SIZE(s5k5e3_mode_full),
++	},
++	{
++		.width = 640, .height = 480,
++		.llp = 2950, .fll = 506,
++		.regs = s5k5e3_mode_preview,
++		.nregs = ARRAY_SIZE(s5k5e3_mode_preview),
++	},
++};
++
+ 
+ struct s5k5e3 {
+ 	struct device *dev;
+@@ -225,6 +304,8 @@
+ 	struct v4l2_ctrl *vblank;
+ 	struct v4l2_ctrl *exposure;
+ 	struct v4l2_ctrl *again;
++
++	const struct s5k5e3_mode *mode;
+ };
+ 
+ static const s64 s5k5e3_link_freqs[] = {
+@@ -296,7 +377,8 @@
+ 
+ 	/* Пределы экспозиции следуют за vblank */
+ 	if (ctrl->id == V4L2_CID_VBLANK) {
+-		int max = S5K5E3_HEIGHT + ctrl->val - S5K5E3_EXPOSURE_MARGIN;
++		int max = s5k->mode->height + ctrl->val -
++			  S5K5E3_EXPOSURE_MARGIN;
+ 
+ 		__v4l2_ctrl_modify_range(s5k->exposure, S5K5E3_EXPOSURE_MIN,
+ 					 max, 1, max);
+@@ -315,7 +397,7 @@
+ 		break;
+ 	case V4L2_CID_VBLANK:
+ 		cci_write(s5k->regmap, S5K5E3_REG_VTS,
+-			  S5K5E3_HEIGHT + ctrl->val, &ret);
++			  s5k->mode->height + ctrl->val, &ret);
+ 		break;
+ 	default:
+ 		break;
+@@ -338,8 +420,7 @@
+ 	if (ret)
+ 		return ret;
+ 
+-	ret = s5k5e3_write_table(s5k, s5k5e3_preview_setting,
+-				 ARRAY_SIZE(s5k5e3_preview_setting));
++	ret = s5k5e3_write_table(s5k, s5k->mode->regs, s5k->mode->nregs);
+ 	if (ret)
+ 		return ret;
+ 
+@@ -394,21 +475,58 @@
+ 				  struct v4l2_subdev_state *state,
+ 				  struct v4l2_subdev_frame_size_enum *fse)
+ {
+-	if (fse->index || fse->code != MEDIA_BUS_FMT_SGRBG10_1X10)
++	if (fse->index >= ARRAY_SIZE(s5k5e3_modes) ||
++	    fse->code != MEDIA_BUS_FMT_SGRBG10_1X10)
+ 		return -EINVAL;
+ 
+-	fse->min_width = S5K5E3_WIDTH;
+-	fse->max_width = S5K5E3_WIDTH;
+-	fse->min_height = S5K5E3_HEIGHT;
+-	fse->max_height = S5K5E3_HEIGHT;
++	fse->min_width = s5k5e3_modes[fse->index].width;
++	fse->max_width = s5k5e3_modes[fse->index].width;
++	fse->min_height = s5k5e3_modes[fse->index].height;
++	fse->max_height = s5k5e3_modes[fse->index].height;
+ 
+ 	return 0;
+ }
+ 
+-static void s5k5e3_update_fmt(struct v4l2_mbus_framefmt *fmt)
++/* Ближайший режим к запрошенному размеру — сравниваем по площади. */
++static const struct s5k5e3_mode *s5k5e3_find_mode(u32 width, u32 height)
+ {
+-	fmt->width = S5K5E3_WIDTH;
+-	fmt->height = S5K5E3_HEIGHT;
++	const struct s5k5e3_mode *best = &s5k5e3_modes[0];
++	s64 want = (s64)width * height;
++	s64 diff = S64_MAX;
++	unsigned int i;
++
++	for (i = 0; i < ARRAY_SIZE(s5k5e3_modes); i++) {
++		s64 have = (s64)s5k5e3_modes[i].width * s5k5e3_modes[i].height;
++		s64 d = want > have ? want - have : have - want;
++
++		if (d < diff) {
++			diff = d;
++			best = &s5k5e3_modes[i];
++		}
++	}
++
++	return best;
++}
++
++/* Слепые зоны и экспозиция зависят от выбранного режима. */
++static void s5k5e3_update_ctrls(struct s5k5e3 *s5k)
++{
++	const struct s5k5e3_mode *m = s5k->mode;
++	int exp_max = m->fll - S5K5E3_EXPOSURE_MARGIN;
++
++	__v4l2_ctrl_modify_range(s5k->hblank, m->llp - m->width,
++				 m->llp - m->width, 1, m->llp - m->width);
++	__v4l2_ctrl_modify_range(s5k->vblank, m->fll - m->height,
++				 0xffff - m->height, 1, m->fll - m->height);
++	__v4l2_ctrl_modify_range(s5k->exposure, S5K5E3_EXPOSURE_MIN,
++				 exp_max, 1, exp_max);
++}
++
++static void s5k5e3_update_fmt(struct v4l2_mbus_framefmt *fmt,
++			      const struct s5k5e3_mode *mode)
++{
++	fmt->width = mode->width;
++	fmt->height = mode->height;
+ 	fmt->code = MEDIA_BUS_FMT_SGRBG10_1X10;
+ 	fmt->field = V4L2_FIELD_NONE;
+ 	fmt->colorspace = V4L2_COLORSPACE_RAW;
+@@ -420,15 +538,26 @@
+ 			  struct v4l2_subdev_state *state,
+ 			  struct v4l2_subdev_format *fmt)
+ {
+-	s5k5e3_update_fmt(&fmt->format);
++	struct s5k5e3 *s5k = to_s5k5e3(sd);
++	const struct s5k5e3_mode *mode;
++
++	mode = s5k5e3_find_mode(fmt->format.width, fmt->format.height);
++	s5k5e3_update_fmt(&fmt->format, mode);
+ 	*v4l2_subdev_state_get_format(state, 0) = fmt->format;
++
++	if (fmt->which == V4L2_SUBDEV_FORMAT_ACTIVE) {
++		s5k->mode = mode;
++		s5k5e3_update_ctrls(s5k);
++	}
++
+ 	return 0;
+ }
+ 
+ static int s5k5e3_init_state(struct v4l2_subdev *sd,
+ 			     struct v4l2_subdev_state *state)
+ {
+-	s5k5e3_update_fmt(v4l2_subdev_state_get_format(state, 0));
++	s5k5e3_update_fmt(v4l2_subdev_state_get_format(state, 0),
++			  &s5k5e3_modes[0]);
  	return 0;
  }
  
