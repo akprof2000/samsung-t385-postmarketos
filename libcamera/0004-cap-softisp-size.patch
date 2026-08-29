@@ -1,0 +1,41 @@
+--- a/src/libcamera/pipeline/simple/simple.cpp
++++ b/src/libcamera/pipeline/simple/simple.cpp
+@@ -434,6 +434,8 @@
+ private:
+ 	static constexpr unsigned int kMaxQueuedRequestsDevice = 4;
+ 	static constexpr unsigned int kNumInternalBuffers = 4;
++	/* Предел размера кадра при программной сборке цвета. */
++	static constexpr Size kSwIspMaxSize = Size(1632, 1224);
+ 
+ 	struct EntityData {
+ 		std::unique_ptr<V4L2VideoDevice> video;
+@@ -1476,6 +1478,29 @@
+ 	setUpFormatSizes(rawFormats);
+ 
+ 	/*
++	 * Ограничение размера кадра, когда цвет собирается процессором.
++	 *
++	 * У этого чипа нет пригодного аппаратного обработчика, и разбор
++	 * матрицы Байера делает центральный процессор. Полный кадр
++	 * восьмимегапиксельной матрицы такой путь не тянет: на SM-T385 это
++	 * 5,6 кадра в секунду против 21 на половинном размере, а каждый
++	 * кадр занимает 32 МБ. Приложение просмотра берёт наибольший из
++	 * предложенных размеров, поэтому при гигабайте памяти оно съедало
++	 * её всю и подвешивало систему намертво.
++	 *
++	 * Необработанный поток не трогаем: снимок в полном разрешении
++	 * по-прежнему доступен тому, кто попросит его прямо.
++	 */
++	if (swIspEnabled_) {
++		for (auto &[format, sizes] : processedFormats) {
++			for (SizeRange &range : sizes) {
++				range.min.boundTo(kSwIspMaxSize);
++				range.max.boundTo(kSwIspMaxSize);
++			}
++		}
++	}
++
++	/*
+ 	 * Create the stream configurations. Take the first entry in the formats
+ 	 * map as the default, for lack of a better option.
+ 	 *
